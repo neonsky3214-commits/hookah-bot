@@ -1,13 +1,5 @@
-# config.py — заполните своими данными
+import os
 
-# Токен бота от @BotFather
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-
-# ID чата/канала/группы, куда слать уведомления о бронях
-# Для группы: отрицательное число, например -1001234567890
-# Для канала: тоже отрицательное, добавьте бота в канал как администратора
-ADMIN_CHAT_ID = -1001234567890
-
-# Список Telegram user_id администраторов (могут использовать /newbook)
-# Узнать свой ID можно через @userinfobot
-ADMIN_IDS = [123456789, 987654321]
+BOT_TOKEN = os.environ.get("8777411837:AAElTBxbr6IBmVaW4JU6qpDZhypieZ_wHGI", "")
+ADMIN_CHAT_ID = int(os.environ.get("-1003658423562", "0"))
+ADMIN_IDS = [int(x) for x in os.environ.get("520032441", "0").split(",")]
