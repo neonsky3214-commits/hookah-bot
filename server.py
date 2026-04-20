@@ -98,19 +98,40 @@ async def save_booking(pool, data: dict, tg_user: str):
         return row["id"]
 
 
+def get_blocked_slots(book_time: str, duration_minutes: int = 120, step: int = 30) -> list:
+    """Возвращает список слотов, которые блокирует данное время бронирования."""
+    from datetime import datetime, timedelta
+    try:
+        dt = datetime.strptime(book_time, "%H:%M")
+    except:
+        return [book_time]
+    slots = []
+    for i in range(0, duration_minutes, step):
+        slot = (dt + timedelta(minutes=i)).strftime("%H:%M")
+        slots.append(slot)
+    return slots
+
 async def get_taken_tables(pool, book_date: str, zone: str, book_time: str = None):
     async with pool.acquire() as conn:
         if book_time:
+            # Получаем все активные брони на эту дату и зону
             rows = await conn.fetch("""
-                SELECT table_num FROM bookings
-                WHERE book_date=$1 AND zone=$2 AND book_time=$3 AND status='active'
-            """, book_date, zone, book_time)
+                SELECT table_num, book_time FROM bookings
+                WHERE book_date=$1 AND zone=$2 AND status='active'
+            """, book_date, zone)
+            # Проверяем каждую бронь: блокирует ли она запрашиваемый слот
+            taken = []
+            for r in rows:
+                blocked = get_blocked_slots(r['book_time'])
+                if book_time in blocked:
+                    taken.append(r['table_num'])
+            return taken
         else:
             rows = await conn.fetch("""
                 SELECT table_num FROM bookings
                 WHERE book_date=$1 AND zone=$2 AND status='active'
             """, book_date, zone)
-        return [r["table_num"] for r in rows]
+            return [r["table_num"] for r in rows]
 
 
 async def get_gallery(pool):
