@@ -426,7 +426,7 @@ function onDatePick(el,ds){
 
 function buildTimes(){
   var el=document.getElementById('timeGrid'); el.innerHTML='';
-  var taken=['18:00','19:30','21:00'];
+  var taken=[];
   var times=[];
   for(var h=15;h<24;h++){times.push(pad(h)+':00');times.push(pad(h)+':30');}
   for(var h=0;h<=2;h++){times.push(pad(h)+':00');if(h<2)times.push(pad(h)+':30');}
@@ -498,6 +498,8 @@ function submitBooking(){
 
 buildDates();
 buildTimes();
+var firstPill=document.querySelector('.date-pill');
+if(firstPill)firstPill.click();
 </script>
 </body>
 </html>
