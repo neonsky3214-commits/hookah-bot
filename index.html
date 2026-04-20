@@ -251,7 +251,7 @@ var LAYOUTS = {
       {id:1, x:80,  y:45,  cap:3, taken:false},
       {id:2, x:125, y:45,  cap:3, taken:false},
       {id:3, x:170, y:45,  cap:5, taken:false},
-      {id:4, x:215, y:45,  cap:4, taken:true},
+      {id:4, x:215, y:45,  cap:4, taken:false},
       {id:5, x:255, y:45,  cap:4, taken:false},
       {id:6, x:295, y:45,  cap:7, taken:false},
       // Центр (2 двушки)
@@ -259,7 +259,7 @@ var LAYOUTS = {
       {id:8, x:210, y:120, cap:2, taken:false},
       // Нижний ряд (4 стола)
       {id:9,  x:75,  y:195, cap:7, taken:false},
-      {id:10, x:125, y:195, cap:5, taken:true},
+      {id:10, x:125, y:195, cap:5, taken:false},
       {id:11, x:175, y:195, cap:4, taken:false},
       {id:12, x:225, y:195, cap:2, taken:false}
     ]
@@ -268,7 +268,7 @@ var LAYOUTS = {
     tables: [
       {id:1, x:70,  y:60,  cap:4, taken:false},
       {id:2, x:170, y:60,  cap:4, taken:false},
-      {id:3, x:270, y:60,  cap:6, taken:true},
+      {id:3, x:270, y:60,  cap:6, taken:false},
       {id:4, x:70,  y:170, cap:4, taken:false},
       {id:5, x:170, y:170, cap:6, taken:false},
       {id:6, x:270, y:170, cap:4, taken:false}
@@ -479,9 +479,14 @@ function fillSum(){
 }
 
 function submitBooking(){
+  if(!ST.table){alert('Выберите столик на схеме');return;}
   var data={
-    zone:ST.zone,table:ST.table,tableCapacity:ST.cap,
-    date:ST.date,time:ST.time,guests:ST.guests,
+    zone:ST.zone,
+    table:ST.table,
+    tableCapacity:ST.cap,
+    date:ST.date,
+    time:ST.time,
+    guests:ST.guests,
     name:document.getElementById('nameI').value.trim(),
     phone:document.getElementById('phoneI').value.trim(),
     rulesAccepted:true
