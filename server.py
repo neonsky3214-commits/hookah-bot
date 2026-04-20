@@ -140,9 +140,10 @@ async def cmd_start(message: Message, state: FSMContext):
 @dp.message(F.text == "📅 Забронировать")
 async def btn_book(message: Message):
     url = WEBAPP_URL or "https://example.com"
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть форму бронирования", web_app=WebAppInfo(url=url))
-    ]])
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📅 Открыть бронирование", web_app=WebAppInfo(url=url))]],
+        resize_keyboard=True
+    )
     await message.answer("Нажмите кнопку ниже:", reply_markup=kb)
 
 
