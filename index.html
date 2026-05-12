@@ -581,6 +581,38 @@ body{font-family:var(--fb);color:var(--cream);font-size:14px;-webkit-font-smooth
 .loona-nc-title{font-family:var(--fh);font-size:14px;font-weight:700;margin-bottom:6px}
 .loona-nc-sub{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:14px}
 .loona-reg-btn{width:100%;background:linear-gradient(135deg,var(--bronze-dark),var(--bronze));border:none;border-radius:14px;padding:13px;font-family:var(--fh);font-size:12px;font-weight:700;color:#0D0D0D;cursor:pointer;letter-spacing:-0.01em}
+
+/* ── LOYALTY CARD FULLSCREEN ── */
+.card-overlay{position:fixed;inset:0;background:#0D0D0D;z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.3s}
+.card-overlay.on{opacity:1;pointer-events:all}
+.card-close{position:absolute;top:max(20px,env(safe-area-inset-top));right:20px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,0.08);border:none;color:var(--cream);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.card-wrap{width:min(340px,90vw);animation:scIn 0.35s cubic-bezier(.34,1.56,.64,1) both}
+.card-body{background:linear-gradient(145deg,#1a0800,#3B0910,#2a1200);border-radius:24px;padding:28px 24px;position:relative;overflow:hidden;border:0.5px solid rgba(205,127,50,0.3)}
+.card-body::before{content:'';position:absolute;top:-50px;right:-50px;width:200px;height:200px;background:radial-gradient(circle,rgba(205,127,50,0.15),transparent 65%)}
+.card-body::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(205,127,50,0.5),transparent)}
+.card-brand{font-size:10px;font-weight:700;color:rgba(205,127,50,0.6);letter-spacing:0.25em;text-transform:uppercase;margin-bottom:4px}
+.card-holder{font-family:var(--fh);font-size:22px;font-weight:700;letter-spacing:-0.02em;margin-bottom:20px}
+.card-stats{display:flex;gap:0;background:rgba(0,0,0,0.25);border-radius:14px;overflow:hidden;margin-bottom:20px}
+.card-stat{flex:1;padding:12px 8px;text-align:center;border-right:0.5px solid rgba(205,127,50,0.1)}
+.card-stat:last-child{border:none}
+.card-stat-val{font-family:var(--fh);font-size:18px;font-weight:700;color:var(--bronze)}
+.card-stat-lbl{font-size:9px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:0.08em}
+.card-qr-wrap{background:white;border-radius:16px;padding:16px;display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.card-qr-wrap img{width:180px;height:180px;display:block}
+.card-qr-loading{width:180px;height:180px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.card-level{display:flex;align-items:center;justify-content:space-between}
+.card-level-name{font-family:var(--fh);font-size:14px;font-weight:700;color:var(--bronze)}
+.card-max-pay{font-size:11px;color:var(--muted)}
+.card-hint{text-align:center;font-size:12px;color:var(--muted);margin-top:16px;line-height:1.6}
+.card-progress{margin-top:14px}
+.card-prog-label{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:6px}
+.card-prog-bar{height:3px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
+.card-prog-fill{height:100%;background:linear-gradient(90deg,var(--bronze-dark),var(--bronze));border-radius:2px;transition:width 1s cubic-bezier(.4,0,.2,1)}
+
+/* Show card button */
+.show-card-btn{width:100%;background:linear-gradient(135deg,var(--bronze-dark),var(--bronze));border:none;border-radius:16px;padding:15px;font-family:var(--fh);font-size:13px;font-weight:700;color:#0D0D0D;cursor:pointer;transition:all 0.2s;letter-spacing:-0.01em;display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 14px}
+.show-card-btn:active{transform:scale(0.97)}
+.show-card-btn svg{stroke:#0D0D0D}
 </style>
 </head>
 <body>
@@ -940,6 +972,32 @@ body{font-family:var(--fb);color:var(--cream);font-size:14px;-webkit-font-smooth
   </div>
 
 
+
+  <!-- LOYALTY CARD FULLSCREEN -->
+  <div class="card-overlay" id="cardOverlay">
+    <button class="card-close" onclick="closeCardOverlay()">✕</button>
+    <div class="card-wrap">
+      <div class="card-body">
+        <div class="card-brand">LIWAN · Карта привилегий</div>
+        <div class="card-holder" id="co-name">Гость</div>
+        <div class="card-stats">
+          <div class="card-stat"><div class="card-stat-val" id="co-balance">—</div><div class="card-stat-lbl">Баллов</div></div>
+          <div class="card-stat"><div class="card-stat-val" id="co-pct">—</div><div class="card-stat-lbl">Кэшбэк</div></div>
+          <div class="card-stat"><div class="card-stat-val" id="co-visits">—</div><div class="card-stat-lbl">Визитов</div></div>
+        </div>
+        <div class="card-qr-wrap" id="co-qr-wrap">
+          <div class="card-qr-loading">Загрузка...</div>
+        </div>
+        <div class="card-level">
+          <div class="card-level-name" id="co-level">—</div>
+          <div class="card-max-pay" id="co-maxpay">—</div>
+        </div>
+        <div class="card-progress" id="co-progress"></div>
+      </div>
+      <div class="card-hint">Покажите QR-код кассиру для начисления и списания баллов</div>
+    </div>
+  </div>
+
   <!-- BOOKING DETAIL MODAL -->
   <div class="bm-overlay" id="bookingModal" onclick="closeBM(event)">
     <div class="bm-sheet">
@@ -1036,7 +1094,7 @@ function switchTab(name){
   document.getElementById('page-'+name).scrollTop=0;
   var at=document.getElementById('tab-'+name);at.classList.add('active');
   var as=at.querySelector('svg');if(as)as.setAttribute('stroke','#F0EEE9');
-  if(name==='profile'){loadFlavors();loadMyBookings();}
+  if(name==='profile'){loadFlavors();loadMyBookings();loadCardData();}
   if(name==='booking' && (_pendingTime || _pendingDate)){
     applyEventDateTime(_pendingDate, _pendingTime);
     _pendingTime = null;
@@ -1574,6 +1632,65 @@ async function checkRegistration(){
 }
 
 
+
+// ── Loyalty Card Overlay ──
+var _cardData = null;
+
+async function openCardOverlay(){
+  document.getElementById('cardOverlay').classList.add('on');
+  document.body.style.overflow = 'hidden';
+  if(!TG_USER_ID){ initUserData(); }
+  await loadCardData();
+}
+
+function closeCardOverlay(){
+  document.getElementById('cardOverlay').classList.remove('on');
+  document.body.style.overflow = '';
+}
+
+async function loadCardData(){
+  if(!TG_USER_ID) return;
+  try{
+    var j = await (await fetch('/api/my-card?tg_user_id=' + TG_USER_ID)).json();
+    if(!j.ok){
+      document.getElementById('co-qr-wrap').innerHTML = '<div class="card-qr-loading">Карта не найдена.<br/>Зарегистрируйтесь в программе.</div>';
+      return;
+    }
+    _cardData = j;
+    // Update stats
+    document.getElementById('co-name').textContent = j.name || 'Гость';
+    document.getElementById('co-balance').textContent = j.balance || 0;
+    document.getElementById('co-pct').textContent = (j.percentage || 0) + '%';
+    document.getElementById('co-visits').textContent = j.visits || 0;
+    document.getElementById('co-level').textContent = j.level || 'Старт';
+    document.getElementById('co-maxpay').textContent = 'Оплата баллами до ' + (j.max_payment_pct || 0) + '%';
+
+    // QR code via Google Charts API
+    var passId = j.pass_id;
+    var qrData = j.card_url || passId;
+    var qrUrl = 'https://chart.googleapis.com/chart?chs=180x180&cht=qr&chl=' + encodeURIComponent(qrData) + '&choe=UTF-8';
+    document.getElementById('co-qr-wrap').innerHTML = '<img src="' + qrUrl + '" alt="QR код карты" style="width:180px;height:180px;display:block"/>';
+
+    // Progress bar
+    var visits = j.visits || 0;
+    var nextTarget = visits < 20 ? 20 : visits < 50 ? 50 : visits < 70 ? 70 : null;
+    var prevTarget = visits < 20 ? 0 : visits < 50 ? 20 : visits < 70 ? 50 : 70;
+    var nextLevel = visits < 20 ? 'Бронза' : visits < 50 ? 'Серебро' : visits < 70 ? 'Золото' : null;
+    var progEl = document.getElementById('co-progress');
+    if(nextTarget){
+      var pct = Math.round((visits - prevTarget) / (nextTarget - prevTarget) * 100);
+      progEl.innerHTML = '<div class="card-prog-label"><span>До уровня «' + nextLevel + '»</span><span>' + visits + ' / ' + nextTarget + '</span></div><div class="card-prog-bar"><div class="card-prog-fill" style="width:' + pct + '%"></div></div>';
+    } else {
+      progEl.innerHTML = '<div style="text-align:center;font-size:11px;color:var(--bronze);margin-top:8px">Максимальный уровень достигнут!</div>';
+    }
+
+    // Also update loona card in profile
+    renderLoonaCard(j, j.name);
+
+  } catch(e){
+    document.getElementById('co-qr-wrap').innerHTML = '<div class="card-qr-loading">Ошибка загрузки</div>';
+  }
+}
 function renderLoonaCard(loona, userName){
   var wrap = document.getElementById('loonCardWrap');
   if(!wrap || !loona) return;

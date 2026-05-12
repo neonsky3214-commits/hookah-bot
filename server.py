@@ -1127,6 +1127,53 @@ async def api_booking_comment(request):
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)})
 
+
+async def api_my_card(request):
+    """Get user loyalty card info with QR code link"""
+    tg_user_id = request.rel_url.query.get("tg_user_id", "")
+    if not tg_user_id or not db_pool:
+        return web.json_response({"ok": False})
+    try:
+        row = await db_pool.fetchrow(
+            "SELECT name, loona_pass_id FROM users WHERE tg_user_id=$1", int(tg_user_id)
+        )
+        if not row or not row.get("loona_pass_id"):
+            return web.json_response({"ok": False, "error": "Card not found"})
+
+        pass_id = row["loona_pass_id"]
+
+        # Get card from Loona
+        if LOONA_ENABLED:
+            card = await get_card(pass_id)
+            if card:
+                vals = {v["name"]: v["value"] for v in card.get("placeholderValues", [])}
+                visits = int(vals.get("ownVisits", 0))
+                balance = int(vals.get("ownBalance", 0))
+                pct = int(vals.get("ownPercentage", 0))
+                from loona import get_level_name, get_max_payment_pct
+                return web.json_response({
+                    "ok": True,
+                    "pass_id": pass_id,
+                    "name": row["name"],
+                    "balance": balance,
+                    "percentage": pct,
+                    "visits": visits,
+                    "level": get_level_name(visits),
+                    "max_payment_pct": get_max_payment_pct(visits),
+                    "card_url": card.get("passUrl") or card.get("url") or f"https://app.loona.ai/pass/{pass_id}",
+                })
+
+        return web.json_response({
+            "ok": True,
+            "pass_id": pass_id,
+            "name": row["name"],
+            "balance": 0, "percentage": 0, "visits": 0,
+            "level": "Старт", "max_payment_pct": 0,
+        })
+    except Exception as e:
+        logger.error(f"my_card error: {e}")
+        return web.json_response({"ok": False, "error": str(e)})
+
 async def serve_rules(request):
     here = os.path.dirname(os.path.abspath(__file__))
     pdf_path = os.path.join(here, "rules.pdf")
@@ -1165,6 +1212,7 @@ async def main():
     app.router.add_post("/api/cancel-booking", api_cancel_booking)
     app.router.add_post("/api/reschedule-booking", api_reschedule_booking)
     app.router.add_post("/api/booking-comment", api_booking_comment)
+    app.router.add_get("/api/my-card", api_my_card)
     app.router.add_get("/api/my-bookings", api_my_bookings)
     app.router.add_get("/api/flavors", api_get_flavors)
     app.router.add_post("/api/flavors", api_save_flavors)
