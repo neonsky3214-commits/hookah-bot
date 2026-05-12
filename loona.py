@@ -27,44 +27,67 @@ _token_cache = {"token": None, "expires_at": 0}
 
 
 async def get_access_token() -> str | None:
-    """Получить OAuth access token. Кэшируется до истечения срока."""
+    """Получить OAuth access token через client-secret."""
     now = time.time()
     if _token_cache["token"] and _token_cache["expires_at"] > now + 30:
         return _token_cache["token"]
 
-    if not LOONA_CLIENT_ID or not LOONA_CLIENT_SECRET:
-        logger.warning("Loona: LOONA_CLIENT_ID or LOONA_CLIENT_SECRET not set")
+    if not LOONA_CLIENT_SECRET:
+        logger.warning("Loona: LOONA_CLIENT_SECRET not set")
         return None
 
-    # Basic auth: base64(clientId:clientSecret)
-    credentials = f"{LOONA_CLIENT_ID}:{LOONA_CLIENT_SECRET}"
+    # According to Loona docs: Basic auth where credential = base64(clientId:secret)
+    # clientId = secret itself when no separate clientId exists
+    # Try: secret:secret, then :secret, then secret alone
+    
+    # Method 1: use secret as both id and secret (most common for single-key APIs)
+    credentials = f"{LOONA_CLIENT_SECRET}:{LOONA_CLIENT_SECRET}"
     encoded = base64.b64encode(credentials.encode()).decode()
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.loona.ai/oauth/token",
-                headers={
-                    "Authorization": f"Basic {encoded}",
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                data="grant_type=client_credentials"
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    token = data.get("access_token")
-                    expires_in = data.get("expires_in", 299)
-                    _token_cache["token"] = token
-                    _token_cache["expires_at"] = now + expires_in
-                    logger.info("Loona: access token obtained")
-                    return token
-                else:
+    logger.info(f"Loona: authenticating with secret={LOONA_CLIENT_SECRET[:8]}...")
+    
+    async def try_auth(auth_header, data="grant_type=client_credentials"):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.loona.ai/oauth/token",
+                    headers={
+                        "Authorization": auth_header,
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    data=data
+                ) as resp:
                     text = await resp.text()
-                    logger.error(f"Loona auth error {resp.status}: {text}")
+                    logger.info(f"Loona auth attempt {resp.status}: {text[:200]}")
+                    if resp.status == 200:
+                        import json as _json
+                        data_j = _json.loads(text)
+                        return data_j.get("access_token")
                     return None
-    except Exception as e:
-        logger.error(f"Loona auth exception: {e}")
-        return None
+        except Exception as e:
+            logger.error(f"Loona auth exception: {e}")
+            return None
+
+    # Try different combinations
+    attempts = [
+        # secret:secret
+        f"Basic {base64.b64encode(f'{LOONA_CLIENT_SECRET}:{LOONA_CLIENT_SECRET}'.encode()).decode()}",
+        # empty:secret  
+        f"Basic {base64.b64encode(f':{LOONA_CLIENT_SECRET}'.encode()).decode()}",
+        # secret: (empty password)
+        f"Basic {base64.b64encode(f'{LOONA_CLIENT_SECRET}:'.encode()).decode()}",
+    ]
+    
+    for auth_header in attempts:
+        token = await try_auth(auth_header)
+        if token:
+            _token_cache["token"] = token
+            _token_cache["expires_at"] = now + 299
+            logger.info("Loona: access token obtained successfully!")
+            return token
+    
+    logger.error("Loona: all auth attempts failed")
+    return None
 
 
 async def _auth_headers() -> dict:
@@ -98,6 +121,7 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
     if email:
         payload["person"]["email"] = email
 
+    logger.info(f"Loona: creating card for {name}, template={LOONA_TEMPLATE_ID}")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
