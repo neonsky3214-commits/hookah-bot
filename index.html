@@ -558,6 +558,29 @@ body{font-family:var(--fb);color:var(--cream);font-size:14px;-webkit-font-smooth
 /* Reschedule sub-sheet */
 .bm-reschedule{display:none;padding:0 20px}
 .bm-reschedule.on{display:block;animation:fadeUp 0.25s both}
+
+/* Loona Card */
+.loona-card{margin:0 20px 14px;border-radius:22px;overflow:hidden;position:relative;background:linear-gradient(135deg,#1a0800 0%,#3B0910 50%,#2a1200 100%);border:0.5px solid rgba(205,127,50,0.25)}
+.loona-card::before{content:'';position:absolute;top:-40px;right:-40px;width:180px;height:180px;background:radial-gradient(circle,rgba(205,127,50,0.12),transparent 65%);pointer-events:none}
+.loona-card::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(205,127,50,0.5),transparent)}
+.loona-inner{padding:20px}
+.loona-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
+.loona-brand{font-size:10px;font-weight:700;color:rgba(205,127,50,0.6);letter-spacing:0.2em;text-transform:uppercase}
+.loona-name{font-family:var(--fh);font-size:18px;font-weight:700;letter-spacing:-0.01em;margin-top:2px}
+.loona-level-badge{background:linear-gradient(135deg,var(--bronze-dark),var(--bronze));border-radius:20px;padding:5px 14px;font-size:11px;font-weight:700;color:#0D0D0D;font-family:var(--fh)}
+.loona-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;background:rgba(0,0,0,0.2);border-radius:14px;overflow:hidden;margin-bottom:14px}
+.loona-stat{padding:12px 8px;text-align:center;border-right:0.5px solid rgba(205,127,50,0.1)}
+.loona-stat:last-child{border:none}
+.loona-stat-val{font-family:var(--fh);font-size:20px;font-weight:700;color:var(--bronze);line-height:1}
+.loona-stat-lbl{font-size:9px;color:var(--muted);margin-top:3px;letter-spacing:0.08em;text-transform:uppercase}
+.loona-progress-wrap{margin-bottom:4px}
+.loona-progress-label{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:6px}
+.loona-progress-bar{height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden}
+.loona-progress-fill{height:100%;background:linear-gradient(90deg,var(--bronze-dark),var(--bronze));border-radius:2px;transition:width 0.8s cubic-bezier(.4,0,.2,1)}
+.loona-not-connected{padding:20px;text-align:center}
+.loona-nc-title{font-family:var(--fh);font-size:14px;font-weight:700;margin-bottom:6px}
+.loona-nc-sub{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:14px}
+.loona-reg-btn{width:100%;background:linear-gradient(135deg,var(--bronze-dark),var(--bronze));border:none;border-radius:14px;padding:13px;font-family:var(--fh);font-size:12px;font-weight:700;color:#0D0D0D;cursor:pointer;letter-spacing:-0.01em}
 </style>
 </head>
 <body>
@@ -1550,6 +1573,38 @@ async function checkRegistration(){
   }
 }
 
+
+function renderLoonaCard(loona, userName){
+  var wrap = document.getElementById('loonCardWrap');
+  if(!wrap || !loona) return;
+  var visits = loona.visits || 0;
+  var balance = loona.balance || 0;
+  var pct = loona.percentage || 0;
+  var level = loona.level || 'Старт';
+  // Progress to next level
+  var nextTarget = visits < 20 ? 20 : visits < 50 ? 50 : visits < 70 ? 70 : 100;
+  var prevTarget = visits < 20 ? 0 : visits < 50 ? 20 : visits < 70 ? 50 : 70;
+  var progress = nextTarget <= prevTarget ? 100 : Math.round((visits - prevTarget) / (nextTarget - prevTarget) * 100);
+  var nextLevel = visits < 20 ? 'Бронза' : visits < 50 ? 'Серебро' : visits < 70 ? 'Золото' : 'Максимум';
+
+  wrap.innerHTML = '<div class="loona-card">' +
+    '<div class="loona-inner">' +
+      '<div class="loona-top">' +
+        '<div><div class="loona-brand">LIWAN · Карта привилегий</div><div class="loona-name">'+(userName||'Гость')+'</div></div>' +
+        '<div class="loona-level-badge">'+level+'</div>' +
+      '</div>' +
+      '<div class="loona-stats">' +
+        '<div class="loona-stat"><div class="loona-stat-val">'+balance+'</div><div class="loona-stat-lbl">Баллов</div></div>' +
+        '<div class="loona-stat"><div class="loona-stat-val">'+pct+'%</div><div class="loona-stat-lbl">Кэшбэк</div></div>' +
+        '<div class="loona-stat"><div class="loona-stat-val">'+visits+'</div><div class="loona-stat-lbl">Визитов</div></div>' +
+      '</div>' +
+      (visits < 70 ? '<div class="loona-progress-wrap">' +
+        '<div class="loona-progress-label"><span>До уровня «'+nextLevel+'»</span><span>'+visits+' / '+nextTarget+'</span></div>' +
+        '<div class="loona-progress-bar"><div class="loona-progress-fill" style="width:'+progress+'%"></div></div>' +
+      '</div>' : '<div style="font-size:11px;color:var(--bronze);text-align:center;margin-top:4px">Максимальный уровень достигнут! 🥇</div>') +
+    '</div>' +
+  '</div>';
+}
 function applyUserName(name){
   if(!name) return;
   var ne=document.getElementById('prof-name');

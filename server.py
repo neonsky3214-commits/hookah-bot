@@ -11,6 +11,11 @@ import os
 import io
 from datetime import datetime, timedelta
 import asyncpg
+try:
+    from loona import create_card, update_card, get_card, get_percentage_for_visits, get_level_name
+    LOONA_ENABLED = True
+except ImportError:
+    LOONA_ENABLED = False
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -131,6 +136,7 @@ async def init_db(pool):
                 phone         TEXT NOT NULL,
                 email         TEXT,
                 age_confirmed BOOLEAN DEFAULT TRUE,
+                loona_pass_id TEXT,
                 registered_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -146,7 +152,8 @@ async def init_db(pool):
         """)
         # Migrations
         for sql in [
-            'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS comment TEXT',
+'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS comment TEXT',
+            'ALTER TABLE users ADD COLUMN IF NOT EXISTS loona_pass_id TEXT',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS tg_user_id BIGINT',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating INTEGER',
@@ -837,6 +844,29 @@ async def api_booking_post(request):
             InlineKeyboardButton(text="❌ Отменить", callback_data=f"cancel_{booking_id}")
         ]])
         await bot.send_message(ADMIN_CHAT_ID, text, parse_mode="HTML", reply_markup=kb)
+
+        # Update Loona card after booking
+        if LOONA_ENABLED and tg_user_id:
+            try:
+                user_row = await db_pool.fetchrow(
+                    "SELECT loona_pass_id FROM users WHERE tg_user_id=$1", tg_user_id
+                )
+                if user_row and user_row.get("loona_pass_id"):
+                    visits = await db_pool.fetchval(
+                        "SELECT COUNT(*) FROM bookings WHERE tg_user_id=$1 AND status='active'", tg_user_id
+                    )
+                    visits = int(visits or 0)
+                    pct = get_percentage_for_visits(visits)
+                    await update_card(
+                        user_row["loona_pass_id"],
+                        balance=0,
+                        percentage=pct,
+                        total_spent=0,
+                        visits=visits
+                    )
+            except Exception as le:
+                logger.error(f"Loona update error: {le}")
+
         return web.json_response({"ok": True, "id": booking_id})
     except Exception as e:
         logger.error(f"API booking error: {e}")
@@ -992,7 +1022,23 @@ async def api_register(request):
                 parse_mode="HTML")
         except:
             pass
-        return web.json_response({"ok": True, "id": row["id"]})
+        # Create Loona loyalty card
+        loona_pass_id = None
+        if LOONA_ENABLED:
+            try:
+                card = await create_card(name, phone, email)
+                if card and card.get("id"):
+                    loona_pass_id = str(card["id"])
+                    async with db_pool.acquire() as conn2:
+                        await conn2.execute(
+                            "UPDATE users SET loona_pass_id=$1 WHERE tg_user_id=$2",
+                            loona_pass_id, tg_user_id
+                        )
+                    logger.info(f"Loona card created for {name}: {loona_pass_id}")
+            except Exception as le:
+                logger.error(f"Loona card creation error: {le}")
+
+        return web.json_response({"ok": True, "id": row["id"], "loona_pass_id": loona_pass_id})
     except Exception as e:
         logger.error(f"Register error: {e}")
         return web.json_response({"ok": False, "error": str(e)}, status=500)
@@ -1003,7 +1049,24 @@ async def api_check_user(request):
     if not tg_user_id or not db_pool: return web.json_response({"registered": False})
     try:
         row = await db_pool.fetchrow("SELECT id, name FROM users WHERE tg_user_id=$1", int(tg_user_id))
-        if row: return web.json_response({"registered": True, "name": row["name"]})
+        if row:
+            resp = {"registered": True, "name": row["name"]}
+            if row.get("loona_pass_id") and LOONA_ENABLED:
+                try:
+                    card = await get_card(row["loona_pass_id"])
+                    if card:
+                        vals = {v["name"]: v["value"] for v in card.get("placeholderValues", [])}
+                        visits = int(vals.get("ownVisits", 0))
+                        resp["loona"] = {
+                            "pass_id": row["loona_pass_id"],
+                            "balance": int(vals.get("ownBalance", 0)),
+                            "percentage": int(vals.get("ownPercentage", 0)),
+                            "visits": visits,
+                            "level": get_level_name(visits)
+                        }
+                except Exception as le:
+                    logger.error(f"Loona check error: {le}")
+            return web.json_response(resp)
         return web.json_response({"registered": False})
     except:
         return web.json_response({"registered": False})
