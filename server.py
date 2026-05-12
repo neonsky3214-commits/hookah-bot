@@ -658,6 +658,91 @@ async def cmd_clearmenu(message: Message):
 
 # ─── Помощь ───────────────────────────────────────────────────────────────────
 
+
+@dp.message(Command("makecard"))
+async def cmd_makecard(message: Message):
+    """Manually create Loona card for existing user by phone or tg_user_id"""
+    if not is_admin(message.from_user.id): return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "Использование:\n"
+            "/makecard @username — создать карту для пользователя\n"
+            "/makecard all — создать карты всем без карты"
+        )
+        return
+
+    arg = parts[1].strip()
+
+    if arg == "all":
+        # Create cards for all users without loona_pass_id
+        rows = await db_pool.fetch(
+            "SELECT tg_user_id, name, phone, email FROM users WHERE loona_pass_id IS NULL"
+        )
+        if not rows:
+            await message.answer("✅ У всех пользователей уже есть карты.")
+            return
+        await message.answer(f"Создаю карты для {len(rows)} пользователей...")
+        ok = 0
+        fail = 0
+        for r in rows:
+            if LOONA_ENABLED:
+                card = await create_card(r["name"], r["phone"], r["email"] or "")
+                if card and card.get("id"):
+                    async with db_pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET loona_pass_id=$1 WHERE tg_user_id=$2",
+                            str(card["id"]), r["tg_user_id"]
+                        )
+                    ok += 1
+                    # Notify user
+                    try:
+                        await bot.send_message(
+                            r["tg_user_id"],
+                            "🎉 <b>Ваша карта лояльности LIWAN активирована!</b>\n\n"
+                            "Откройте профиль в приложении чтобы увидеть карту и QR-код.",
+                            parse_mode="HTML"
+                        )
+                    except: pass
+                else:
+                    fail += 1
+            await asyncio.sleep(0.3)
+        await message.answer(f"✅ Готово! Создано: {ok}, ошибок: {fail}")
+    else:
+        # Create card for specific user by tg_username
+        username = arg.lstrip("@")
+        row = await db_pool.fetchrow(
+            "SELECT tg_user_id, name, phone, email, loona_pass_id FROM users WHERE tg_username=$1",
+            username
+        )
+        if not row:
+            await message.answer(f"❌ Пользователь @{username} не найден в базе.")
+            return
+        if row["loona_pass_id"]:
+            await message.answer(f"ℹ️ У @{username} уже есть карта: {row['loona_pass_id']}")
+            return
+        if LOONA_ENABLED:
+            card = await create_card(row["name"], row["phone"], row["email"] or "")
+            if card and card.get("id"):
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET loona_pass_id=$1 WHERE tg_user_id=$2",
+                        str(card["id"]), row["tg_user_id"]
+                    )
+                await message.answer(f"✅ Карта создана для @{username}\nID: {card['id']}")
+                try:
+                    await bot.send_message(
+                        row["tg_user_id"],
+                        "🎉 <b>Ваша карта лояльности LIWAN активирована!</b>\n\n"
+                        "Откройте профиль в приложении чтобы увидеть карту и QR-код.",
+                        parse_mode="HTML"
+                    )
+                except: pass
+            else:
+                await message.answer(f"❌ Не удалось создать карту. Проверь переменные LOONA_*")
+        else:
+            await message.answer("❌ Loona не подключена. Проверь переменные LOONA_CLIENT_ID и LOONA_CLIENT_SECRET")
+
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     if is_admin(message.from_user.id):
