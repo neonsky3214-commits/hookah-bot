@@ -93,6 +93,7 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
             {"name": "lastName",  "value": last_name},
             {"name": "phone",     "value": phone},
             {"name": "gender",    "value": "MALE"},
+            {"name": "birthday",  "value": "2000-01-01"},
         ],
     }
     if email:
@@ -111,11 +112,43 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
                 logger.info(f"Loona create_card → {r.status}: {body[:500]}")
                 if r.status in (200, 201):
                     return json.loads(body)
+                # Card already exists - find it by phone
+                if r.status == 400 and "already exists" in body:
+                    logger.info(f"Card already exists for {phone}, searching...")
+                    return await find_card_by_phone(phone, token)
                 return None
     except Exception as e:
         logger.error(f"Loona create_card error: {e}")
         return None
 
+
+
+async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
+    """Find existing card by phone number"""
+    if not token:
+        token = await get_token()
+    if not token:
+        return None
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
+                f"{LOONA_BASE}/passes/search",
+                json={"templateId": int(LOONA_TEMPLATE_ID)},
+                headers=_hdrs(token),
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                if r.status == 200:
+                    data = json.loads(await r.text())
+                    items = data.get("content") or data.get("items") or []
+                    for item in items:
+                        vals = {v["name"]: v["value"] for v in item.get("placeholderValues", [])}
+                        if vals.get("phone") == phone:
+                            logger.info(f"Found existing card for {phone}: {item.get('id')}")
+                            return item
+                return None
+    except Exception as e:
+        logger.error(f"Loona find_card error: {e}")
+        return None
 
 async def get_card(pass_id: str) -> dict | None:
     token = await get_token()
