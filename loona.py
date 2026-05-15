@@ -124,28 +124,32 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
 
 
 async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
-    """Find existing card by phone number"""
+    """Find existing card by phone number using search API"""
     if not token:
         token = await get_token()
     if not token:
         return None
     try:
         async with aiohttp.ClientSession() as s:
+            # Search by phone
             async with s.post(
                 f"{LOONA_BASE}/passes/search",
-                json={"templateId": int(LOONA_TEMPLATE_ID)},
+                json={
+                    "templateId": int(LOONA_TEMPLATE_ID),
+                    "phone": phone
+                },
                 headers=_hdrs(token),
                 timeout=aiohttp.ClientTimeout(total=10)
             ) as r:
+                body = await r.text()
+                logger.info(f"Loona search by phone {phone} → {r.status}: {body[:300]}")
                 if r.status == 200:
-                    data = json.loads(await r.text())
+                    data = json.loads(body)
                     items = data.get("content") or data.get("items") or []
-                    for item in items:
-                        vals = {v["name"]: v["value"] for v in item.get("placeholderValues", [])}
-                        if vals.get("phone") == phone:
-                            logger.info(f"Found existing card for {phone}: {item.get('id')}")
-                            return item
-                return None
+                    if items:
+                        logger.info(f"Found card for {phone}: id={items[0].get('id')}")
+                        return items[0]
+        return None
     except Exception as e:
         logger.error(f"Loona find_card error: {e}")
         return None
