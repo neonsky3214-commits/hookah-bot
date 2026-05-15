@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,viewport-fit=cover"/>
 <title>LIWAN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <style>
 :root{
@@ -1674,8 +1675,21 @@ async function loadCardData(){
     // QR code via Google Charts API
     var passId = j.pass_id;
     var qrData = j.card_url || passId;
-    var qrUrl = 'https://chart.googleapis.com/chart?chs=180x180&cht=qr&chl=' + encodeURIComponent(qrData) + '&choe=UTF-8';
-    document.getElementById('co-qr-wrap').innerHTML = '<img src="' + qrUrl + '" alt="QR код карты" style="width:180px;height:180px;display:block"/>';
+    // Generate QR using qrcodejs library
+    var qrWrap = document.getElementById('co-qr-wrap');
+    qrWrap.innerHTML = '<div id="qr-canvas" style="display:flex;align-items:center;justify-content:center"></div>';
+    try {
+      new QRCode(document.getElementById('qr-canvas'), {
+        text: qrData,
+        width: 180,
+        height: 180,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    } catch(e) {
+      qrWrap.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center">ID карты:<br/><b style="color:var(--bronze);font-size:18px">' + j.pass_id + '</b></div>';
+    }
 
     // Progress bar
     var visits = j.visits || 0;
