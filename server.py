@@ -743,6 +743,36 @@ async def cmd_makecard(message: Message):
         else:
             await message.answer("❌ Loona не подключена. Проверь переменные LOONA_CLIENT_ID и LOONA_CLIENT_SECRET")
 
+
+@dp.message(Command("testloona"))
+async def cmd_testloona(message: Message):
+    if not is_admin(message.from_user.id): return
+    import base64, aiohttp as ah
+    
+    client_id = os.environ.get("LOONA_CLIENT_ID", "")
+    client_secret = os.environ.get("LOONA_CLIENT_SECRET", "")
+    
+    await message.answer(f"client_id='{client_id}'\nsecret='{client_secret[:8]}...{client_secret[-4:]}'\nlen={len(client_secret)}")
+    
+    # Try auth
+    creds = f"{client_id}:{client_secret}"
+    encoded = base64.b64encode(creds.encode()).decode()
+    
+    try:
+        async with ah.ClientSession() as session:
+            async with session.post(
+                "https://api.loona.ai/oauth/token",
+                headers={
+                    "Authorization": f"Basic {encoded}",
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                data="grant_type=client_credentials"
+            ) as resp:
+                text = await resp.text()
+                await message.answer(f"Status: {resp.status}\nResponse: {text[:500]}")
+    except Exception as e:
+        await message.answer(f"Exception: {e}")
+
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     if is_admin(message.from_user.id):
@@ -1259,6 +1289,17 @@ async def api_my_card(request):
         logger.error(f"my_card error: {e}")
         return web.json_response({"ok": False, "error": str(e)})
 
+
+async def api_get_token(request):
+    """Debug: get Loona token"""
+    if not LOONA_ENABLED:
+        return web.json_response({"ok": False})
+    from loona import get_token
+    token = await get_token()
+    if token:
+        return web.json_response({"token": token})
+    return web.json_response({"ok": False})
+
 async def serve_rules(request):
     here = os.path.dirname(os.path.abspath(__file__))
     pdf_path = os.path.join(here, "rules.pdf")
@@ -1298,6 +1339,7 @@ async def main():
     app.router.add_post("/api/reschedule-booking", api_reschedule_booking)
     app.router.add_post("/api/booking-comment", api_booking_comment)
     app.router.add_get("/api/my-card", api_my_card)
+    app.router.add_get("/api/debug-token", api_get_token)
     app.router.add_get("/api/my-bookings", api_my_bookings)
     app.router.add_get("/api/flavors", api_get_flavors)
     app.router.add_post("/api/flavors", api_save_flavors)
