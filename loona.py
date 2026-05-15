@@ -101,6 +101,7 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
     if email:
         payload["person"]["email"] = email
 
+    logger.info(f"Loona create_card payload: {json.dumps(payload)[:500]}")
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post(
@@ -110,7 +111,7 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
                 timeout=aiohttp.ClientTimeout(total=10)
             ) as r:
                 body = await r.text()
-                logger.info(f"Loona create_card → {r.status}: {body[:300]}")
+                logger.info(f"Loona create_card → {r.status}: {body[:500]}")
                 if r.status in (200, 201):
                     return json.loads(body)
                 return None
