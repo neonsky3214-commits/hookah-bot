@@ -83,23 +83,19 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
     payload = {
         "templateId": int(LOONA_TEMPLATE_ID),
         "placeholderValues": [
-            {"name": "firstName",        "value": first_name},
-            {"name": "lastName",         "value": last_name},
-            {"name": "phone",            "value": phone},
-            {"name": "gender",           "value": ""},
-            {"name": "birthday",         "value": ""},
-            {"name": VAR_BALANCE,        "value": "0"},
-            {"name": VAR_PERCENTAGE,     "value": "0"},
-            {"name": VAR_SPENT,          "value": "0"},
-            {"name": VAR_VISITS,         "value": "0"},
+            {"name": "firstName",    "value": first_name},
+            {"name": "lastName",     "value": last_name},
+            {"name": "phone",        "value": phone},
+            {"name": "gender",       "value": ""},
+            {"name": "birthday",     "value": ""},
+            {"name": VAR_BALANCE,    "value": "0"},
+            {"name": VAR_PERCENTAGE, "value": "0"},
+            {"name": VAR_SPENT,      "value": "0"},
+            {"name": VAR_VISITS,     "value": "0"},
         ],
-        "person": {
-            "name": name,
-            "phone": phone,
-        },
     }
     if email:
-        payload["person"]["email"] = email
+        payload["placeholderValues"].append({"name": "email", "value": email})
 
     logger.info(f"Loona create_card payload: {json.dumps(payload)[:500]}")
     try:
