@@ -93,7 +93,6 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
             {"name": "lastName",  "value": last_name},
             {"name": "phone",     "value": phone},
             {"name": "gender",    "value": "MALE"},
-            {"name": "birthday",  "value": ""},
         ],
     }
     if email:
