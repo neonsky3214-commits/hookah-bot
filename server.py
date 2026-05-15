@@ -924,11 +924,23 @@ async def api_booking_post(request):
         tg_user_id = int(data.get("tg_user_id") or 0)
         tg_username = str(data.get("tg_username") or "")
         tg_user = f"@{tg_username}" if tg_username and tg_username != "guest" else "web"
-        flavors_text = ""
-        if db_pool and tg_user_id:
+        # Use flavors from booking form first, then from profile
+        flavors_text = str(data.get("flavors") or "").strip()
+        if not flavors_text and db_pool and tg_user_id:
             fl = await db_pool.fetchrow("SELECT flavors FROM user_flavors WHERE tg_user_id=$1", tg_user_id)
             if fl and fl["flavors"]:
                 flavors_text = fl["flavors"]
+        # Save flavors to profile if provided in booking
+        if flavors_text and db_pool and tg_user_id:
+            try:
+                async with db_pool.acquire() as conn2:
+                    await conn2.execute("""
+                        INSERT INTO user_flavors (tg_user_id, tg_username, flavors, updated_at)
+                        VALUES ($1, $2, $3, NOW())
+                        ON CONFLICT (tg_user_id) DO UPDATE SET flavors=$3, updated_at=NOW()
+                    """, tg_user_id, tg_username, flavors_text)
+            except:
+                pass
         async with db_pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO bookings (zone,table_num,book_date,book_time,guests,name,phone,tg_user,tg_user_id)

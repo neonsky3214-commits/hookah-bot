@@ -739,6 +739,7 @@ body{font-family:var(--fb);color:var(--cream);font-size:14px;-webkit-font-smooth
             <div class="flabel">Ваши данные</div>
             <input class="inp" id="nameI" type="text" placeholder="Имя" oninput="chkC()" autocomplete="given-name"/>
             <input class="inp" id="phoneI" type="tel" placeholder="+7 (___) ___-__-__" oninput="chkC()" autocomplete="tel"/>
+            <input class="inp" id="flavorsBookI" type="text" placeholder="Любимые ароматы кальяна (необязательно)" autocomplete="off"/>
             <div class="chkrow" id="rulesRow" onclick="toggleRules()">
               <div class="chkbox" id="checkBox"><svg width="12" height="10" viewBox="0 0 12 10" fill="none"><path d="M1 5L4.5 8.5L11 1.5" stroke="#0D0D0D" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
               <div class="chktxt">Я принимаю <a href="/rules" target="_blank" style="color:var(--bronze);text-decoration:underline;text-underline-offset:2px" onclick="event.stopPropagation()">правила посещения заведения</a></div>
@@ -1261,7 +1262,17 @@ function chkC(){var n=document.getElementById('nameI').value.trim();var p=docume
 function bGoTo(n){
   for(var i=1;i<=5;i++){var bs=document.getElementById('bs'+i);if(i===n)bs.classList.add('active');else bs.classList.remove('active');}
   for(var i=1;i<=4;i++){var ps=document.getElementById('ps'+i);if(ps)ps.className='bstep'+(i===n?' on':i<n?' done':'');}
-  if(n===4)fillSum();document.getElementById('page-booking').scrollTop=0;
+  if(n===4)fillSum();
+  if(n===3){
+    // Auto-fill flavors from profile
+    var fi=document.getElementById('flavorsBookI');
+    if(fi && !fi.value && TG_USER_ID){
+      fetch('/api/flavors?tg_user_id='+TG_USER_ID).then(function(r){return r.json();}).then(function(j){
+        if(j.flavors && fi) fi.value=j.flavors;
+      }).catch(function(){});
+    }
+  }
+  document.getElementById('page-booking').scrollTop=0;
 }
 function fillSum(){
   document.getElementById('sv-zone').textContent=ST.zone||'—';
@@ -1274,9 +1285,10 @@ function fillSum(){
 function submitBooking(){
   if(!ST.table){alert('Выберите столик на схеме');return;}
   if(!ST.date||!ST.time){alert('Выберите дату и время');return;}
+  var flavorsBook=document.getElementById('flavorsBookI')?document.getElementById('flavorsBookI').value.trim():'';
   var data={zone:ST.zone,table:ST.table,tableCapacity:ST.cap,date:ST.date,time:ST.time,guests:ST.guests,
     name:document.getElementById('nameI').value.trim(),phone:document.getElementById('phoneI').value.trim(),
-    rulesAccepted:true,tg_user_id:TG_USER_ID,tg_username:TG_USERNAME};
+    flavors:flavorsBook,rulesAccepted:true,tg_user_id:TG_USER_ID,tg_username:TG_USERNAME};
   if(tg&&tg.sendData)tg.sendData(JSON.stringify(data));
   fetch('/api/booking',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   var det=document.getElementById('ok-details');
