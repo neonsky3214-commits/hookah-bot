@@ -135,7 +135,7 @@ async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
             async with s.post(
                 f"{LOONA_BASE}/passes/search",
                 json={
-                    "templateId": int(LOONA_TEMPLATE_ID),
+                    "templateIds": [int(LOONA_TEMPLATE_ID)],
                     "phone": phone
                 },
                 headers=_hdrs(token),
