@@ -1688,8 +1688,16 @@ async function loadCardData(){
         correctLevel: QRCode.CorrectLevel.M
       });
     } catch(e) {
-      qrWrap.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center">ID карты:<br/><b style="color:var(--bronze);font-size:18px">' + j.pass_id + '</b></div>';
+      qrWrap.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center">Не удалось сгенерировать QR</div>';
     }
+    // Add digital code below QR
+    qrWrap.insertAdjacentHTML('afterend',
+      '<div style="text-align:center;margin-top:12px">' +
+        '<div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px">Цифровой код карты</div>' +
+        '<div style="font-family:var(--fh);font-size:28px;font-weight:700;color:var(--bronze);letter-spacing:0.12em">' + j.pass_id + '</div>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:4px">Назовите кассиру</div>' +
+      '</div>'
+    );
 
     // Progress bar
     var visits = j.visits || 0;
