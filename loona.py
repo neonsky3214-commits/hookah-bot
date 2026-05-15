@@ -80,18 +80,20 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
     first_name = parts[0] if parts else name
     last_name = parts[1] if len(parts) > 1 else ""
 
+    # Format phone: ensure +7 format
+    if phone.startswith("8") and len(phone) == 11:
+        phone = "+7" + phone[1:]
+    elif not phone.startswith("+"):
+        phone = "+" + phone
+
     payload = {
         "templateId": int(LOONA_TEMPLATE_ID),
         "placeholderValues": [
-            {"name": "firstName",    "value": first_name},
-            {"name": "lastName",     "value": last_name},
-            {"name": "phone",        "value": phone},
-            {"name": "gender",       "value": ""},
-            {"name": "birthday",     "value": ""},
-            {"name": VAR_BALANCE,    "value": "0"},
-            {"name": VAR_PERCENTAGE, "value": "0"},
-            {"name": VAR_SPENT,      "value": "0"},
-            {"name": VAR_VISITS,     "value": "0"},
+            {"name": "firstName", "value": first_name},
+            {"name": "lastName",  "value": last_name},
+            {"name": "phone",     "value": phone},
+            {"name": "gender",    "value": "MALE"},
+            {"name": "birthday",  "value": ""},
         ],
     }
     if email:
