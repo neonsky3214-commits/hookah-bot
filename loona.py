@@ -136,7 +136,7 @@ async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
                 f"{LOONA_BASE}/passes/search",
                 json={
                     "templateIds": [int(LOONA_TEMPLATE_ID)],
-                    "phone": phone
+                    "phones": [phone]
                 },
                 headers=_hdrs(token),
                 timeout=aiohttp.ClientTimeout(total=10)
