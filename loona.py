@@ -1,90 +1,78 @@
 """
 LIWAN x Loona Loyalty Integration
-API: https://api.loona.ai/version1
-Auth: OAuth2 client_credentials
+Инструкция: POS система типа API, client_id = идентификационный номер POS системы
+Auth: POST /oauth/token, Basic base64(client_id:client_secret)
 """
 import aiohttp
 import logging
 import os
 import base64
 import time
+import json
 
 logger = logging.getLogger(__name__)
 
-LOONA_BASE = "https://api.loona.ai/version1"
-LOONA_CLIENT_ID     = os.environ.get("LOONA_CLIENT_ID", "")
-LOONA_CLIENT_SECRET = os.environ.get("LOONA_CLIENT_SECRET", "90c7316b-946d-4439-959a-23baa06cd770")
+LOONA_BASE          = "https://api.loona.ai/version1"
+LOONA_TOKEN_URL     = "https://api.loona.ai/oauth/token"
+LOONA_CLIENT_ID     = os.environ.get("LOONA_CLIENT_ID", "1674")
+LOONA_CLIENT_SECRET = os.environ.get("LOONA_CLIENT_SECRET", "")
 LOONA_TEMPLATE_ID   = os.environ.get("LOONA_TEMPLATE_ID", "1674")
 
-# Переменные карты (должны совпадать с названиями в макете Loona)
-VAR_BALANCE    = os.environ.get("LOONA_VAR_BALANCE",    "ownBalance")
-VAR_PERCENTAGE = os.environ.get("LOONA_VAR_PERCENTAGE", "ownPercentage")
-VAR_SPENT      = os.environ.get("LOONA_VAR_SPENT",      "ownTotalSpent")
-VAR_VISITS     = os.environ.get("LOONA_VAR_VISITS",     "ownVisits")
+VAR_BALANCE    = "ownBalance"
+VAR_PERCENTAGE = "ownPercentage"
+VAR_SPENT      = "ownTotalSpent"
+VAR_VISITS     = "ownVisits"
 
-# Token cache
 _token_cache = {"token": None, "expires_at": 0}
 
 
-async def get_access_token() -> str | None:
-    """Получить OAuth access token. Кэшируется до истечения срока."""
+async def get_token() -> str | None:
     now = time.time()
-    if _token_cache["token"] and _token_cache["expires_at"] > now + 30:
+    if _token_cache["token"] and _token_cache["expires_at"] > now + 10:
         return _token_cache["token"]
 
-    if not LOONA_CLIENT_ID or not LOONA_CLIENT_SECRET:
-        logger.warning(f"Loona: missing credentials (client_id={LOONA_CLIENT_ID})")
+    if not LOONA_CLIENT_SECRET:
+        logger.error("LOONA_CLIENT_SECRET не задан")
         return None
 
-    # Basic auth: base64(clientId:clientSecret)
-    credentials = f"{LOONA_CLIENT_ID}:{LOONA_CLIENT_SECRET}"
-    encoded = base64.b64encode(credentials.encode()).decode()
-    logger.info(f"Loona: authenticating client_id={LOONA_CLIENT_ID}")
+    creds = f"{LOONA_CLIENT_ID}:{LOONA_CLIENT_SECRET}"
+    encoded = base64.b64encode(creds.encode("utf-8")).decode("utf-8")
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://api.loona.ai/oauth/token",
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
+                LOONA_TOKEN_URL,
                 headers={
                     "Authorization": f"Basic {encoded}",
-                    "Content-Type": "application/x-www-form-urlencoded"
+                    "Content-Type": "application/x-www-form-urlencoded",
                 },
-                data="grant_type=client_credentials"
-            ) as resp:
-                text = await resp.text()
-                if resp.status == 200:
-                    import json as _json
-                    data = _json.loads(text)
-                    token = data.get("access_token")
-                    expires_in = data.get("expires_in", 299)
+                data="grant_type=client_credentials",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                body = await r.text()
+                logger.info(f"Loona /oauth/token → {r.status}: {body[:200]}")
+                if r.status == 200:
+                    data = json.loads(body)
+                    token = data["access_token"]
                     _token_cache["token"] = token
-                    _token_cache["expires_at"] = now + expires_in
-                    logger.info(f"Loona: access token obtained!")
+                    _token_cache["expires_at"] = now + data.get("expires_in", 299)
                     return token
-                else:
-                    logger.error(f"Loona auth error {resp.status}: {text}")
-                    return None
+                return None
     except Exception as e:
-        logger.error(f"Loona auth exception: {e}")
+        logger.error(f"Loona get_token error: {e}")
         return None
 
 
-async def _auth_headers() -> dict:
-    token = await get_access_token()
-    if not token:
-        return {}
+def _hdrs(token: str) -> dict:
     return {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
 
 async def create_card(name: str, phone: str, email: str = "") -> dict | None:
-    """Создать карту лояльности для нового гостя"""
-    if not LOONA_TEMPLATE_ID:
-        return None
-    headers = await _auth_headers()
-    if not headers:
+    token = await get_token()
+    if not token:
         return None
 
     payload = {
@@ -95,126 +83,94 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
             {"name": VAR_SPENT,      "value": "0"},
             {"name": VAR_VISITS,     "value": "0"},
         ],
-        "person": {"name": name, "phone": phone}
+        "person": {"name": name, "phone": phone},
     }
     if email:
         payload["person"]["email"] = email
 
-    logger.info(f"Loona: creating card for {name}, template={LOONA_TEMPLATE_ID}")
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
                 f"{LOONA_BASE}/passes",
                 json=payload,
-                headers=headers
-            ) as resp:
-                if resp.status in (200, 201):
-                    data = await resp.json()
-                    logger.info(f"Loona card created: {data.get('id')}")
-                    return data
-                else:
-                    text = await resp.text()
-                    logger.error(f"Loona create_card {resp.status}: {text}")
-                    return None
+                headers=_hdrs(token),
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                body = await r.text()
+                logger.info(f"Loona create_card → {r.status}: {body[:300]}")
+                if r.status in (200, 201):
+                    return json.loads(body)
+                return None
     except Exception as e:
-        logger.error(f"Loona create_card exception: {e}")
+        logger.error(f"Loona create_card error: {e}")
         return None
 
 
 async def get_card(pass_id: str) -> dict | None:
-    """Получить текущее состояние карты"""
-    headers = await _auth_headers()
-    if not headers:
+    token = await get_token()
+    if not token:
         return None
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
                 f"{LOONA_BASE}/passes/{pass_id}",
-                headers=headers
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                else:
-                    logger.error(f"Loona get_card {resp.status}")
-                    return None
+                headers=_hdrs(token),
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                if r.status == 200:
+                    return json.loads(await r.text())
+                logger.error(f"Loona get_card → {r.status}")
+                return None
     except Exception as e:
-        logger.error(f"Loona get_card exception: {e}")
+        logger.error(f"Loona get_card error: {e}")
         return None
 
 
 async def update_card(pass_id: str, balance: int, percentage: int,
                       total_spent: int, visits: int) -> bool:
-    """Обновить состояние карты — передаём ВСЕ переменные"""
-    headers = await _auth_headers()
-    if not headers:
+    token = await get_token()
+    if not token:
         return False
+    payload = {
+        "placeholderValues": [
+            {"name": VAR_BALANCE,    "value": str(balance)},
+            {"name": VAR_PERCENTAGE, "value": str(percentage)},
+            {"name": VAR_SPENT,      "value": str(total_spent)},
+            {"name": VAR_VISITS,     "value": str(visits)},
+        ]
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.put(
+        async with aiohttp.ClientSession() as s:
+            async with s.put(
                 f"{LOONA_BASE}/passes/{pass_id}",
-                json={
-                    "placeholderValues": [
-                        {"name": VAR_BALANCE,    "value": str(balance)},
-                        {"name": VAR_PERCENTAGE, "value": str(percentage)},
-                        {"name": VAR_SPENT,      "value": str(total_spent)},
-                        {"name": VAR_VISITS,     "value": str(visits)},
-                    ]
-                },
-                headers=headers
-            ) as resp:
-                if resp.status == 200:
-                    logger.info(f"Loona card {pass_id} updated: visits={visits}, %={percentage}")
-                    return True
-                else:
-                    text = await resp.text()
-                    logger.error(f"Loona update_card {resp.status}: {text}")
-                    return False
+                json=payload,
+                headers=_hdrs(token),
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as r:
+                body = await r.text()
+                logger.info(f"Loona update_card → {r.status}: {body[:200]}")
+                return r.status == 200
     except Exception as e:
-        logger.error(f"Loona update_card exception: {e}")
+        logger.error(f"Loona update_card error: {e}")
         return False
-
-
-async def search_card_by_phone(phone: str) -> dict | None:
-    """Найти карту по номеру телефона"""
-    headers = await _auth_headers()
-    if not headers:
-        return None
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{LOONA_BASE}/passes/search",
-                json={"phone": phone, "templateId": int(LOONA_TEMPLATE_ID)},
-                headers=headers
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get("content") or data.get("items") or []
-                    return items[0] if items else None
-                else:
-                    return None
-    except Exception as e:
-        logger.error(f"Loona search exception: {e}")
-        return None
 
 
 # ─── Бизнес-логика ────────────────────────────────────────────────────────────
 
 def get_percentage_for_visits(visits: int) -> int:
-    """Кэшбэк по количеству визитов"""
-    if visits < 20:  return 0
-    if visits < 50:  return 5
-    if visits < 70:  return 7
+    if visits < 20: return 0
+    if visits < 50: return 5
+    if visits < 70: return 7
     return 10
 
 def get_max_payment_pct(visits: int) -> int:
-    """Максимальный % оплаты баллами"""
-    if visits < 20:  return 0
-    if visits < 50:  return 10
-    if visits < 70:  return 15
+    if visits < 20: return 0
+    if visits < 50: return 10
+    if visits < 70: return 15
     return 20
 
 def get_level_name(visits: int) -> str:
-    if visits < 20:  return "Старт"
-    if visits < 50:  return "Бронза"
-    if visits < 70:  return "Серебро"
+    if visits < 20: return "Старт"
+    if visits < 50: return "Бронза"
+    if visits < 70: return "Серебро"
     return "Золото"
