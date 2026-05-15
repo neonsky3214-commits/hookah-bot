@@ -75,6 +75,11 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
     if not token:
         return None
 
+    # Split name into first/last
+    parts = name.strip().split(" ", 1)
+    first_name = parts[0] if parts else name
+    last_name = parts[1] if len(parts) > 1 else ""
+
     payload = {
         "templateId": int(LOONA_TEMPLATE_ID),
         "placeholderValues": [
@@ -82,8 +87,18 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
             {"name": VAR_PERCENTAGE, "value": "0"},
             {"name": VAR_SPENT,      "value": "0"},
             {"name": VAR_VISITS,     "value": "0"},
+            {"name": "firstName",    "value": first_name},
+            {"name": "lastName",     "value": last_name},
+            {"name": "phone",        "value": phone},
+            {"name": "birthday",     "value": ""},
+            {"name": "gender",       "value": ""},
         ],
-        "person": {"name": name, "phone": phone},
+        "person": {
+            "name": name,
+            "phone": phone,
+            "firstName": first_name,
+            "lastName": last_name,
+        },
     }
     if email:
         payload["person"]["email"] = email
