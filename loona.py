@@ -18,10 +18,10 @@ LOONA_CLIENT_ID     = os.environ.get("LOONA_CLIENT_ID", "1674")
 LOONA_CLIENT_SECRET = os.environ.get("LOONA_CLIENT_SECRET", "")
 LOONA_TEMPLATE_ID   = os.environ.get("LOONA_TEMPLATE_ID", "1674")
 
-VAR_BALANCE    = "ownBalance"
-VAR_PERCENTAGE = "ownPercentage"
-VAR_SPENT      = "ownTotalSpent"
-VAR_VISITS     = "ownVisits"
+VAR_BALANCE    = "balance"
+VAR_PERCENTAGE = "percentage"
+VAR_SPENT      = "totalSpent"
+VAR_VISITS     = "transactionsCount"
 
 _token_cache = {"token": None, "expires_at": 0}
 
@@ -83,21 +83,19 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
     payload = {
         "templateId": int(LOONA_TEMPLATE_ID),
         "placeholderValues": [
-            {"name": VAR_BALANCE,    "value": "0"},
-            {"name": VAR_PERCENTAGE, "value": "0"},
-            {"name": VAR_SPENT,      "value": "0"},
-            {"name": VAR_VISITS,     "value": "0"},
-            {"name": "firstName",    "value": first_name},
-            {"name": "lastName",     "value": last_name},
-            {"name": "phone",        "value": phone},
-            {"name": "birthday",     "value": ""},
-            {"name": "gender",       "value": ""},
+            {"name": "firstName",        "value": first_name},
+            {"name": "lastName",         "value": last_name},
+            {"name": "phone",            "value": phone},
+            {"name": "gender",           "value": ""},
+            {"name": "birthday",         "value": ""},
+            {"name": VAR_BALANCE,        "value": "0"},
+            {"name": VAR_PERCENTAGE,     "value": "0"},
+            {"name": VAR_SPENT,          "value": "0"},
+            {"name": VAR_VISITS,         "value": "0"},
         ],
         "person": {
             "name": name,
             "phone": phone,
-            "firstName": first_name,
-            "lastName": last_name,
         },
     }
     if email:
@@ -146,12 +144,22 @@ async def update_card(pass_id: str, balance: int, percentage: int,
     token = await get_token()
     if not token:
         return False
+    # Get current card first to preserve all fields
+    current = await get_card(pass_id)
+    current_vals = {}
+    if current:
+        for v in current.get("placeholderValues", []):
+            current_vals[v["name"]] = v["value"]
+
+    # Update only our fields, keep rest as is
+    current_vals[VAR_BALANCE]    = str(balance)
+    current_vals[VAR_PERCENTAGE] = str(percentage)
+    current_vals[VAR_SPENT]      = str(total_spent)
+    current_vals[VAR_VISITS]     = str(visits)
+
     payload = {
         "placeholderValues": [
-            {"name": VAR_BALANCE,    "value": str(balance)},
-            {"name": VAR_PERCENTAGE, "value": str(percentage)},
-            {"name": VAR_SPENT,      "value": str(total_spent)},
-            {"name": VAR_VISITS,     "value": str(visits)},
+            {"name": k, "value": v} for k, v in current_vals.items()
         ]
     }
     try:
