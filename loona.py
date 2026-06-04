@@ -131,7 +131,6 @@ async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
         return None
     try:
         async with aiohttp.ClientSession() as s:
-            # Search by phone
             async with s.post(
                 f"{LOONA_BASE}/passes/search",
                 json={
@@ -146,9 +145,21 @@ async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
                 if r.status == 200:
                     data = json.loads(body)
                     items = data.get("content") or data.get("items") or []
-                    if items:
-                        logger.info(f"Found card for {phone}: id={items[0].get('id')}")
+                    # Find card that matches this exact phone
+                    for item in items:
+                        vals = {v["name"]: v["value"] for v in item.get("placeholderValues", [])}
+                        item_phone = vals.get("phone", "")
+                        # Normalize phones for comparison
+                        norm_search = phone.replace("+7", "8").replace("-","").replace(" ","")
+                        norm_item = item_phone.replace("+7", "8").replace("-","").replace(" ","")
+                        if norm_search == norm_item or item_phone == phone:
+                            logger.info(f"Found matching card for {phone}: id={item.get('id')}")
+                            return item
+                    # If only 1 result, return it
+                    if len(items) == 1:
+                        logger.info(f"Found single card for {phone}: id={items[0].get('id')}")
                         return items[0]
+                    logger.warning(f"No exact match for {phone} in {len(items)} results")
         return None
     except Exception as e:
         logger.error(f"Loona find_card error: {e}")

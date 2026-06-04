@@ -773,6 +773,26 @@ async def cmd_testloona(message: Message):
     except Exception as e:
         await message.answer(f"Exception: {e}")
 
+
+@dp.message(Command("fixcards"))
+async def cmd_fixcards(message: Message):
+    """Clear wrong loona_pass_id and reassign correctly"""
+    if not is_admin(message.from_user.id): return
+    
+    # Show current state
+    rows = await db_pool.fetch(
+        "SELECT tg_user_id, name, phone, loona_pass_id FROM users ORDER BY id"
+    )
+    text = "📋 Текущее состояние карт:\n\n"
+    for r in rows:
+        text += f"👤 {r['name']} · {r['phone']}\n🎫 {r['loona_pass_id'] or 'нет'}\n──\n"
+    await message.answer(text[:4000])
+    
+    # Clear all loona_pass_id
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET loona_pass_id=NULL")
+    await message.answer("🗑 Все карты сброшены. Теперь напиши /makecard all для пересоздания.")
+
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     if is_admin(message.from_user.id):
