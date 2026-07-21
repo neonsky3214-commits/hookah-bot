@@ -1393,6 +1393,37 @@ async def api_debug_card(request):
     return web.json_response({"ok": True, "pass_id": pass_id, "card": card})
 
 
+async def api_debug_search(request):
+    """Debug: return raw first search item so we can see its real field structure."""
+    if not LOONA_ENABLED:
+        return web.json_response({"ok": False, "error": "Loona disabled"})
+    from loona import get_token, LOONA_BASE, LOONA_TEMPLATE_ID, _hdrs
+    import aiohttp as _ah, json as _json
+    token = await get_token()
+    if not token:
+        return web.json_response({"ok": False, "error": "no token"})
+    try:
+        async with _ah.ClientSession() as s:
+            async with s.post(
+                f"{LOONA_BASE}/passes/search?page=0&size=100",
+                json={"templateIds": [int(LOONA_TEMPLATE_ID)]},
+                headers=_hdrs(token),
+                timeout=_ah.ClientTimeout(total=15)
+            ) as r:
+                data = _json.loads(await r.text())
+        items = data.get("content") or []
+        return web.json_response({
+            "ok": True,
+            "total_elements": data.get("totalElements"),
+            "total_pages": data.get("totalPages"),
+            "page_size": data.get("size"),
+            "num_in_page": len(items),
+            "first_item": items[0] if items else None,
+        })
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e)})
+
+
 async def serve_rules(request):
     here = os.path.dirname(os.path.abspath(__file__))
     pdf_path = os.path.join(here, "rules.pdf")
@@ -1434,6 +1465,7 @@ async def main():
     app.router.add_get("/api/my-card", api_my_card)
     app.router.add_get("/api/debug-token", api_get_token)
     app.router.add_get("/api/debug-card", api_debug_card)
+    app.router.add_get("/api/debug-search", api_debug_search)
     app.router.add_get("/api/my-bookings", api_my_bookings)
     app.router.add_get("/api/flavors", api_get_flavors)
     app.router.add_post("/api/flavors", api_save_flavors)
