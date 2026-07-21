@@ -145,21 +145,25 @@ async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
                 if r.status == 200:
                     data = json.loads(body)
                     items = data.get("content") or data.get("items") or []
-                    # Find card that matches this exact phone
+
+                    def _norm(p):
+                        p = (p or "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                        if p.startswith("8") and len(p) == 11:
+                            p = "+7" + p[1:]
+                        if p.startswith("7") and len(p) == 11:
+                            p = "+" + p
+                        return p
+
+                    target = _norm(phone)
                     for item in items:
                         vals = {v["name"]: v["value"] for v in item.get("placeholderValues", [])}
-                        item_phone = vals.get("phone", "")
-                        # Normalize phones for comparison
-                        norm_search = phone.replace("+7", "8").replace("-","").replace(" ","")
-                        norm_item = item_phone.replace("+7", "8").replace("-","").replace(" ","")
-                        if norm_search == norm_item or item_phone == phone:
+                        if _norm(vals.get("phone", "")) == target:
                             logger.info(f"Found matching card for {phone}: id={item.get('id')}")
                             return item
-                    # If only 1 result, return it
-                    if len(items) == 1:
-                        logger.info(f"Found single card for {phone}: id={items[0].get('id')}")
-                        return items[0]
-                    logger.warning(f"No exact match for {phone} in {len(items)} results")
+                    # NO fallback — never return a card whose phone doesn't match,
+                    # otherwise one card gets assigned to many users.
+                    logger.warning(f"No exact phone match for {phone} among {len(items)} results")
+                    return None
         return None
     except Exception as e:
         logger.error(f"Loona find_card error: {e}")

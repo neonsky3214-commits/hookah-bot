@@ -690,10 +690,12 @@ async def cmd_makecard(message: Message):
             if LOONA_ENABLED:
                 card = await create_card(r["name"], r["phone"], r["email"] or "")
                 if card and card.get("id"):
+                    pass_id = str(card["id"])
+                    barcode = str(card.get("barcodeText") or card.get("barcodeAltText") or pass_id)
                     async with db_pool.acquire() as conn:
                         await conn.execute(
-                            "UPDATE users SET loona_pass_id=$1 WHERE tg_user_id=$2",
-                            str(card["id"]), r["tg_user_id"]
+                            "UPDATE users SET loona_pass_id=$1, loona_barcode=$2 WHERE tg_user_id=$3",
+                            pass_id, barcode, r["tg_user_id"]
                         )
                     ok += 1
                     # Notify user
