@@ -684,6 +684,13 @@ async def cmd_makecard(message: Message):
             await message.answer("✅ У всех пользователей уже есть карты.")
             return
         await message.answer(f"Создаю карты для {len(rows)} пользователей...")
+        # Prewarm phone index once (fetches all existing cards)
+        try:
+            from loona import build_phone_index
+            idx = await build_phone_index(force=True)
+            await message.answer(f"📇 Индекс карт построен: {len(idx)} номеров")
+        except Exception as e:
+            logger.error(f"index build error: {e}")
         ok = 0
         fail = 0
         for r in rows:

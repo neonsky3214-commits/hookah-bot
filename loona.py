@@ -132,48 +132,81 @@ def _norm_phone(p):
     return p
 
 
-async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
-    """Find existing card by phone.
+# Cache: {normalized_phone: card_object}
+_phone_index = {"map": None, "built_at": 0}
 
-    The Loona /passes/search 'phones' filter is unreliable (returns a full page
-    regardless of the filter), so we page through all passes for the template
-    and match the phone locally.
-    """
-    if not token:
-        token = await get_token()
-    if not token:
-        return None
 
-    target = _norm_phone(phone)
-    try:
-        async with aiohttp.ClientSession() as s:
-            for page in range(0, 40):  # up to 40 pages * 100 = 4000 cards
-                url = f"{LOONA_BASE}/passes/search?page={page}&size=100"
-                async with s.post(
-                    url,
-                    json={"templateIds": [int(LOONA_TEMPLATE_ID)]},
+async def _list_all_pass_ids(token: str) -> list:
+    """Page through /passes/search and collect every card id."""
+    ids = []
+    async with aiohttp.ClientSession() as s:
+        for page in range(0, 60):
+            async with s.post(
+                f"{LOONA_BASE}/passes/search?page={page}&size=100",
+                json={"templateIds": [int(LOONA_TEMPLATE_ID)]},
+                headers=_hdrs(token),
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as r:
+                if r.status != 200:
+                    break
+                data = json.loads(await r.text())
+                items = data.get("content") or []
+                for it in items:
+                    if it.get("id") is not None:
+                        ids.append(it["id"])
+                if data.get("last") is True or not items:
+                    break
+    return ids
+
+
+async def build_phone_index(force: bool = False) -> dict:
+    """Build {normalized_phone: full_card} by fetching every card once."""
+    now = time.time()
+    if not force and _phone_index["map"] is not None and (now - _phone_index["built_at"]) < 300:
+        return _phone_index["map"]
+
+    token = await get_token()
+    if not token:
+        return {}
+
+    ids = await _list_all_pass_ids(token)
+    logger.info(f"Loona: building phone index for {len(ids)} cards")
+
+    index = {}
+    async with aiohttp.ClientSession() as s:
+        for cid in ids:
+            try:
+                async with s.get(
+                    f"{LOONA_BASE}/passes/{cid}",
                     headers=_hdrs(token),
                     timeout=aiohttp.ClientTimeout(total=15)
                 ) as r:
                     if r.status != 200:
-                        body = await r.text()
-                        logger.error(f"Loona search page {page} → {r.status}: {body[:200]}")
-                        return None
-                    data = json.loads(await r.text())
-                    items = data.get("content") or []
-                    for item in items:
-                        vals = {v["name"]: v["value"] for v in item.get("placeholderValues", [])}
-                        if _norm_phone(vals.get("phone", "")) == target:
-                            logger.info(f"Found card for {phone} on page {page}: id={item.get('id')}")
-                            return item
-                    # Stop when last page reached or no more items
-                    if data.get("last") is True or not items:
-                        break
-        logger.warning(f"No card with phone {phone} found in Loona")
-        return None
-    except Exception as e:
-        logger.error(f"Loona find_card error: {e}")
-        return None
+                        continue
+                    card = json.loads(await r.text())
+                    vals = {v["name"]: v["value"] for v in card.get("placeholderValues", [])}
+                    ph = _norm_phone(vals.get("phone", ""))
+                    if ph:
+                        index[ph] = card
+            except Exception:
+                continue
+
+    _phone_index["map"] = index
+    _phone_index["built_at"] = now
+    logger.info(f"Loona: phone index built, {len(index)} phones")
+    return index
+
+
+async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
+    """Find existing card by phone using a cached phone→card index."""
+    target = _norm_phone(phone)
+    index = await build_phone_index()
+    card = index.get(target)
+    if card:
+        logger.info(f"Found card for {phone}: id={card.get('id')}")
+        return card
+    logger.warning(f"No card with phone {phone} in index of {len(index)}")
+    return None
 
 async def get_card(pass_id: str) -> dict | None:
     token = await get_token()
