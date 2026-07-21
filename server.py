@@ -153,7 +153,8 @@ async def init_db(pool):
         # Migrations
         for sql in [
 'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS comment TEXT',
-            'ALTER TABLE users ADD COLUMN IF NOT EXISTS loona_pass_id TEXT',
+'ALTER TABLE users ADD COLUMN IF NOT EXISTS loona_pass_id TEXT',
+            'ALTER TABLE users ADD COLUMN IF NOT EXISTS loona_barcode TEXT',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS tg_user_id BIGINT',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating INTEGER',
@@ -1298,21 +1299,25 @@ async def api_my_card(request):
                 balance = int(vals.get("ownBalance", 0))
                 pct = int(vals.get("ownPercentage", 0))
                 from loona import get_level_name, get_max_payment_pct
-                return web.json_response({
-                    "ok": True,
-                    "pass_id": pass_id,
-                    "name": row["name"],
-                    "balance": balance,
-                    "percentage": pct,
-                    "visits": visits,
-                    "level": get_level_name(visits),
-                    "max_payment_pct": get_max_payment_pct(visits),
-                    "card_url": card.get("passUrl") or card.get("url") or f"https://app.loona.ai/pass/{pass_id}",
-                })
+                barcode = str(card.get("barcodeText") or card.get("barcodeAltText") or pass_id)
+                    return web.json_response({
+                        "ok": True,
+                        "pass_id": pass_id,
+                        "barcode": barcode,
+                        "name": row["name"],
+                        "balance": balance,
+                        "percentage": pct,
+                        "visits": visits,
+                        "level": get_level_name(visits),
+                        "max_payment_pct": get_max_payment_pct(visits),
+                        "download_url": card.get("downloadUrl") or f"https://app.loona.ai/pass/{pass_id}",
+                    })
 
+        barcode_db = row.get("loona_barcode") or pass_id
         return web.json_response({
             "ok": True,
             "pass_id": pass_id,
+            "barcode": barcode_db,
             "name": row["name"],
             "balance": 0, "percentage": 0, "visits": 0,
             "level": "Старт", "max_payment_pct": 0,
@@ -1331,6 +1336,28 @@ async def api_get_token(request):
     if token:
         return web.json_response({"token": token})
     return web.json_response({"ok": False})
+
+async def api_debug_card(request):
+    """Debug: dump full card JSON from Loona to inspect available fields"""
+    if not LOONA_ENABLED:
+        return web.json_response({"ok": False, "error": "Loona disabled"})
+    tg_user_id = request.rel_url.query.get("tg_user_id", "")
+    pass_id = request.rel_url.query.get("pass_id", "")
+    if not pass_id and tg_user_id and db_pool:
+        row = await db_pool.fetchrow(
+            "SELECT loona_pass_id FROM users WHERE tg_user_id=$1", int(tg_user_id)
+        )
+        if row and row.get("loona_pass_id"):
+            pass_id = row["loona_pass_id"]
+    if not pass_id:
+        return web.json_response({"ok": False, "error": "no pass_id"})
+    from loona import get_card
+    card = await get_card(pass_id)
+    if not card:
+        return web.json_response({"ok": False, "error": "card not found", "pass_id": pass_id})
+    # Return the raw card so we can see every field name
+    return web.json_response({"ok": True, "pass_id": pass_id, "card": card})
+
 
 async def serve_rules(request):
     here = os.path.dirname(os.path.abspath(__file__))
@@ -1372,6 +1399,7 @@ async def main():
     app.router.add_post("/api/booking-comment", api_booking_comment)
     app.router.add_get("/api/my-card", api_my_card)
     app.router.add_get("/api/debug-token", api_get_token)
+    app.router.add_get("/api/debug-card", api_debug_card)
     app.router.add_get("/api/my-bookings", api_my_bookings)
     app.router.add_get("/api/flavors", api_get_flavors)
     app.router.add_post("/api/flavors", api_save_flavors)
