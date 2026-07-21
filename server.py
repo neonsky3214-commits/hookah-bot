@@ -1295,23 +1295,28 @@ async def api_my_card(request):
             card = await get_card(pass_id)
             if card:
                 vals = {v["name"]: v["value"] for v in card.get("placeholderValues", [])}
-                visits = int(vals.get("ownVisits", 0))
-                balance = int(vals.get("ownBalance", 0))
-                pct = int(vals.get("ownPercentage", 0))
+                def _num(x):
+                    try:
+                        return int(float(str(x).replace(" ", "").replace("%", "").replace("₽", "")))
+                    except:
+                        return 0
+                visits = _num(vals.get("transactionsCount", 0))
+                balance = _num(vals.get("balance", 0))
+                pct = _num(vals.get("percentage", 0))
                 from loona import get_level_name, get_max_payment_pct
-                barcode = str(card.get("barcodeText") or card.get("barcodeAltText") or pass_id)
-                    return web.json_response({
-                        "ok": True,
-                        "pass_id": pass_id,
-                        "barcode": barcode,
-                        "name": row["name"],
-                        "balance": balance,
-                        "percentage": pct,
-                        "visits": visits,
-                        "level": get_level_name(visits),
-                        "max_payment_pct": get_max_payment_pct(visits),
-                        "download_url": card.get("downloadUrl") or f"https://app.loona.ai/pass/{pass_id}",
-                    })
+                barcode = str(card.get("barcode") or card.get("barcodeText") or pass_id)
+                return web.json_response({
+                    "ok": True,
+                    "pass_id": pass_id,
+                    "barcode": barcode,
+                    "name": row["name"],
+                    "balance": balance,
+                    "percentage": pct,
+                    "visits": visits,
+                    "level": get_level_name(visits),
+                    "max_payment_pct": get_max_payment_pct(visits),
+                    "download_url": card.get("passUrl") or card.get("downloadUrl") or f"https://app.loona.ai/pass/{pass_id}",
+                })
 
         barcode_db = row.get("loona_barcode") or pass_id
         return web.json_response({
