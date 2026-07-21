@@ -1681,12 +1681,13 @@ async function loadCardData(){
     document.getElementById('co-balance').textContent = j.balance || 0;
     document.getElementById('co-pct').textContent = (j.percentage || 0) + '%';
     document.getElementById('co-visits').textContent = j.visits || 0;
-    document.getElementById('co-level').textContent = j.level || 'Старт';
+    document.getElementById('co-level').textContent = j.level || '—';
     document.getElementById('co-maxpay').textContent = 'Оплата баллами до ' + (j.max_payment_pct || 0) + '%';
 
     // QR code via Google Charts API
     var passId = j.pass_id;
-    var qrData = j.card_url || passId;
+    var barcode = j.barcode || passId;
+    var qrData = barcode; // Use barcodeText for scanning
     // Generate QR using qrcodejs library
     var qrWrap = document.getElementById('co-qr-wrap');
     qrWrap.innerHTML = '<div id="qr-canvas" style="display:flex;align-items:center;justify-content:center"></div>';
@@ -1708,22 +1709,18 @@ async function loadCardData(){
     qrWrap.insertAdjacentHTML('afterend',
       '<div id="co-digital-code" style="text-align:center;margin-top:12px">' +
         '<div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px">Цифровой код карты</div>' +
-        '<div style="font-family:var(--fh);font-size:28px;font-weight:700;color:var(--bronze);letter-spacing:0.12em">' + j.pass_id + '</div>' +
+        '<div style="font-family:var(--fh);font-size:28px;font-weight:700;color:var(--bronze);letter-spacing:0.12em">' + barcode + '</div>' +
         '<div style="font-size:10px;color:var(--muted);margin-top:4px">Назовите кассиру</div>' +
       '</div>'
     );
 
-    // Progress bar
-    var visits = j.visits || 0;
-    var nextTarget = visits < 20 ? 20 : visits < 50 ? 50 : visits < 70 ? 70 : null;
-    var prevTarget = visits < 20 ? 0 : visits < 50 ? 20 : visits < 70 ? 50 : 70;
-    var nextLevel = visits < 20 ? 'Бронза' : visits < 50 ? 'Серебро' : visits < 70 ? 'Золото' : null;
+    // Progress toward next level (Loona tracks by levelIndex)
     var progEl = document.getElementById('co-progress');
-    if(nextTarget){
-      var pct = Math.round((visits - prevTarget) / (nextTarget - prevTarget) * 100);
-      progEl.innerHTML = '<div class="card-prog-label"><span>До уровня «' + nextLevel + '»</span><span>' + visits + ' / ' + nextTarget + '</span></div><div class="card-prog-bar"><div class="card-prog-fill" style="width:' + pct + '%"></div></div>';
+    var li = j.level_index || 1;
+    if(li >= 4){
+      progEl.innerHTML = '<div style="text-align:center;font-size:11px;color:var(--bronze);margin-top:8px">Максимальный уровень достигнут</div>';
     } else {
-      progEl.innerHTML = '<div style="text-align:center;font-size:11px;color:var(--bronze);margin-top:8px">Максимальный уровень достигнут!</div>';
+      progEl.innerHTML = '<div class="card-prog-label"><span>Уровень: ' + (j.level||'—') + '</span><span>Кэшбэк ' + (j.percentage||0) + '%</span></div><div class="card-prog-bar"><div class="card-prog-fill" style="width:' + (li*25) + '%"></div></div>';
     }
 
     // Also update loona card in profile
@@ -1739,12 +1736,9 @@ function renderLoonaCard(loona, userName){
   var visits = loona.visits || 0;
   var balance = loona.balance || 0;
   var pct = loona.percentage || 0;
-  var level = loona.level || 'Старт';
-  // Progress to next level
-  var nextTarget = visits < 20 ? 20 : visits < 50 ? 50 : visits < 70 ? 70 : 100;
-  var prevTarget = visits < 20 ? 0 : visits < 50 ? 20 : visits < 70 ? 50 : 70;
-  var progress = nextTarget <= prevTarget ? 100 : Math.round((visits - prevTarget) / (nextTarget - prevTarget) * 100);
-  var nextLevel = visits < 20 ? 'Бронза' : visits < 50 ? 'Серебро' : visits < 70 ? 'Золото' : 'Максимум';
+  var level = loona.level || '—';
+  var li = loona.level_index || 1;
+  var progress = Math.min(li * 25, 100);
 
   wrap.innerHTML = '<div class="loona-card">' +
     '<div class="loona-inner">' +
@@ -1757,10 +1751,10 @@ function renderLoonaCard(loona, userName){
         '<div class="loona-stat"><div class="loona-stat-val">'+pct+'%</div><div class="loona-stat-lbl">Кэшбэк</div></div>' +
         '<div class="loona-stat"><div class="loona-stat-val">'+visits+'</div><div class="loona-stat-lbl">Визитов</div></div>' +
       '</div>' +
-      (visits < 70 ? '<div class="loona-progress-wrap">' +
-        '<div class="loona-progress-label"><span>До уровня «'+nextLevel+'»</span><span>'+visits+' / '+nextTarget+'</span></div>' +
+      (li < 4 ? '<div class="loona-progress-wrap">' +
+        '<div class="loona-progress-label"><span>Уровень: '+level+'</span><span>Кэшбэк '+pct+'%</span></div>' +
         '<div class="loona-progress-bar"><div class="loona-progress-fill" style="width:'+progress+'%"></div></div>' +
-      '</div>' : '<div style="font-size:11px;color:var(--bronze);text-align:center;margin-top:4px">Максимальный уровень достигнут! 🥇</div>') +
+      '</div>' : '<div style="font-size:11px;color:var(--bronze);text-align:center;margin-top:4px">Максимальный уровень достигнут</div>') +
     '</div>' +
   '</div>';
 }

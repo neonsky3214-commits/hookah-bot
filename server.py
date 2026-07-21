@@ -1294,17 +1294,41 @@ async def api_my_card(request):
         if LOONA_ENABLED:
             card = await get_card(pass_id)
             if card:
-                vals = {v["name"]: v["value"] for v in card.get("placeholderValues", [])}
                 def _num(x):
                     try:
-                        return int(float(str(x).replace(" ", "").replace("%", "").replace("₽", "")))
+                        return float(str(x).replace(" ", "").replace("%", "").replace("₽", ""))
                     except:
-                        return 0
-                visits = _num(vals.get("transactionsCount", 0))
-                balance = _num(vals.get("balance", 0))
-                pct = _num(vals.get("percentage", 0))
-                from loona import get_level_name, get_max_payment_pct
-                barcode = str(card.get("barcode") or card.get("barcodeText") or pass_id)
+                        return 0.0
+
+                # Real loyalty state lives in loyaltyData, NOT in placeholderValues
+                ld = card.get("loyaltyData") or {}
+                balance = int(_num(ld.get("balance", 0)))
+                pct = int(_num(ld.get("percentage", 0)))
+                total_spent = int(_num(ld.get("totalSpent", 0)))
+                level_index = int(_num(ld.get("levelIndex", 1))) or 1
+                visits = int(_num(card.get("numberOfTransactions", 0)))
+
+                # Level name + max payment come from the card's own loyaltySettings
+                level_name = "—"
+                max_pay = 0
+                levels = ((card.get("loyaltySettings") or {}).get("levels")) or []
+                cur_level = None
+                for lv in levels:
+                    if int(_num(lv.get("index", 0))) == level_index:
+                        cur_level = lv
+                        break
+                if cur_level is None and levels:
+                    cur_level = levels[0]
+                if cur_level:
+                    level_name = cur_level.get("name") or "—"
+                    max_pay = int(_num(cur_level.get("levelMaxSpendingRate", 0)))
+
+                # Progress to next level (based on totalSpent thresholds)
+                next_high = None
+                if cur_level:
+                    next_high = _num(cur_level.get("high", 0))
+
+                barcode = str(card.get("barcodeText") or card.get("barcodeAltText") or pass_id)
                 return web.json_response({
                     "ok": True,
                     "pass_id": pass_id,
@@ -1312,10 +1336,13 @@ async def api_my_card(request):
                     "name": row["name"],
                     "balance": balance,
                     "percentage": pct,
+                    "total_spent": total_spent,
                     "visits": visits,
-                    "level": get_level_name(visits),
-                    "max_payment_pct": get_max_payment_pct(visits),
-                    "download_url": card.get("passUrl") or card.get("downloadUrl") or f"https://app.loona.ai/pass/{pass_id}",
+                    "level": level_name,
+                    "level_index": level_index,
+                    "max_payment_pct": max_pay,
+                    "next_level_at": next_high,
+                    "download_url": card.get("downloadUrl") or f"https://app.loona.ai/pass/{pass_id}",
                 })
 
         barcode_db = row.get("loona_barcode") or pass_id
@@ -1325,7 +1352,7 @@ async def api_my_card(request):
             "barcode": barcode_db,
             "name": row["name"],
             "balance": 0, "percentage": 0, "visits": 0,
-            "level": "Старт", "max_payment_pct": 0,
+            "level": "—", "max_payment_pct": 0,
         })
     except Exception as e:
         logger.error(f"my_card error: {e}")
