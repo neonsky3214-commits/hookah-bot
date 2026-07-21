@@ -123,47 +123,53 @@ async def create_card(name: str, phone: str, email: str = "") -> dict | None:
 
 
 
+def _norm_phone(p):
+    p = (p or "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if p.startswith("8") and len(p) == 11:
+        p = "+7" + p[1:]
+    if p.startswith("7") and len(p) == 11:
+        p = "+" + p
+    return p
+
+
 async def find_card_by_phone(phone: str, token: str = None) -> dict | None:
-    """Find existing card by phone number using search API"""
+    """Find existing card by phone.
+
+    The Loona /passes/search 'phones' filter is unreliable (returns a full page
+    regardless of the filter), so we page through all passes for the template
+    and match the phone locally.
+    """
     if not token:
         token = await get_token()
     if not token:
         return None
+
+    target = _norm_phone(phone)
     try:
         async with aiohttp.ClientSession() as s:
-            async with s.post(
-                f"{LOONA_BASE}/passes/search",
-                json={
-                    "templateIds": [int(LOONA_TEMPLATE_ID)],
-                    "phones": [phone]
-                },
-                headers=_hdrs(token),
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as r:
-                body = await r.text()
-                logger.info(f"Loona search by phone {phone} → {r.status}: {body[:300]}")
-                if r.status == 200:
-                    data = json.loads(body)
-                    items = data.get("content") or data.get("items") or []
-
-                    def _norm(p):
-                        p = (p or "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-                        if p.startswith("8") and len(p) == 11:
-                            p = "+7" + p[1:]
-                        if p.startswith("7") and len(p) == 11:
-                            p = "+" + p
-                        return p
-
-                    target = _norm(phone)
+            for page in range(0, 40):  # up to 40 pages * 100 = 4000 cards
+                url = f"{LOONA_BASE}/passes/search?page={page}&size=100"
+                async with s.post(
+                    url,
+                    json={"templateIds": [int(LOONA_TEMPLATE_ID)]},
+                    headers=_hdrs(token),
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as r:
+                    if r.status != 200:
+                        body = await r.text()
+                        logger.error(f"Loona search page {page} → {r.status}: {body[:200]}")
+                        return None
+                    data = json.loads(await r.text())
+                    items = data.get("content") or []
                     for item in items:
                         vals = {v["name"]: v["value"] for v in item.get("placeholderValues", [])}
-                        if _norm(vals.get("phone", "")) == target:
-                            logger.info(f"Found matching card for {phone}: id={item.get('id')}")
+                        if _norm_phone(vals.get("phone", "")) == target:
+                            logger.info(f"Found card for {phone} on page {page}: id={item.get('id')}")
                             return item
-                    # NO fallback — never return a card whose phone doesn't match,
-                    # otherwise one card gets assigned to many users.
-                    logger.warning(f"No exact phone match for {phone} among {len(items)} results")
-                    return None
+                    # Stop when last page reached or no more items
+                    if data.get("last") is True or not items:
+                        break
+        logger.warning(f"No card with phone {phone} found in Loona")
         return None
     except Exception as e:
         logger.error(f"Loona find_card error: {e}")
