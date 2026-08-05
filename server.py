@@ -16,6 +16,7 @@ try:
     LOONA_ENABLED = True
 except ImportError:
     LOONA_ENABLED = False
+import iiko
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -150,6 +151,14 @@ async def init_db(pool):
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS iiko_table_map (
+                zone          TEXT NOT NULL,
+                table_num     INTEGER NOT NULL,
+                iiko_table_id TEXT NOT NULL,
+                PRIMARY KEY (zone, table_num)
+            )
+        """)
         # Migrations
         for sql in [
 'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS comment TEXT',
@@ -160,6 +169,8 @@ async def init_db(pool):
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating INTEGER',
             'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS review TEXT',
             'ALTER TABLE events ADD COLUMN IF NOT EXISTS photo_file_id TEXT',
+            'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS iiko_reserve_id TEXT',
+            'ALTER TABLE bookings ADD COLUMN IF NOT EXISTS iiko_status TEXT',
         ]:
             try:
                 await conn.execute(sql)
@@ -198,6 +209,59 @@ def time_to_minutes(t: str) -> int:
         return h * 60 + m
     except:
         return 0
+
+
+# ─── iiko: синхронизация брони ────────────────────────────────────────────────
+
+async def sync_booking_to_iiko(booking_id: int, zone: str, table_num: int,
+                               book_date: str, book_time: str, guests: int,
+                               name: str, phone: str, comment: str = ""):
+    """Создаёт резерв в iikoFront. Ошибка не ломает бронь в боте —
+    админ получает сообщение и вносит резерв на кассе вручную."""
+    if not iiko.is_enabled() or not db_pool:
+        return
+    try:
+        start = iiko.parse_booking_datetime(book_date, book_time)
+        if not start:
+            raise ValueError(f"не удалось разобрать дату «{book_date} {book_time}»")
+        table_id = await db_pool.fetchval(
+            "SELECT iiko_table_id FROM iiko_table_map WHERE zone=$1 AND table_num=$2",
+            zone, int(table_num)
+        )
+        if not table_id:
+            raise ValueError(f"стол не привязан к iiko ({zone}, №{table_num}) — настройте /iiko_map")
+        reserve_id, err = await iiko.create_reserve(
+            table_ids=[table_id], start=start, guests=guests,
+            name=name, phone=phone, comment=comment
+        )
+        if not reserve_id:
+            raise RuntimeError(err or "неизвестная ошибка iiko")
+        await db_pool.execute(
+            "UPDATE bookings SET iiko_reserve_id=$1, iiko_status='created' WHERE id=$2",
+            reserve_id, booking_id
+        )
+        logger.info(f"iiko: reserve {reserve_id} created for booking #{booking_id}")
+    except Exception as e:
+        logger.error(f"iiko sync #{booking_id}: {e}")
+        try:
+            await db_pool.execute(
+                "UPDATE bookings SET iiko_status=$1 WHERE id=$2", f"error: {e}"[:200], booking_id)
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                f"⚠️ <b>Бронь #{booking_id} не попала в iiko</b>\n{e}\n\nВнесите резерв на кассе вручную.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+
+def iiko_booking_comment(flavors: str, tg_user: str) -> str:
+    parts = ["Бронь из Telegram-бота LIWAN"]
+    if tg_user and tg_user not in ("web", "—"):
+        parts.append(tg_user)
+    if flavors:
+        parts.append(f"Ароматы: {flavors}")
+    return " · ".join(parts)
 
 
 # ─── /start ───────────────────────────────────────────────────────────────────
@@ -258,6 +322,13 @@ async def handle_webapp(message: Message):
             InlineKeyboardButton(text="❌ Отменить бронь", callback_data=f"cancel_{booking_id}")
         ]])
         await bot.send_message(ADMIN_CHAT_ID, text, parse_mode="HTML", reply_markup=kb)
+        asyncio.create_task(sync_booking_to_iiko(
+            booking_id, str(data.get("zone") or "—"), int(data.get("table") or 0),
+            str(data.get("date") or "—"), str(data.get("time") or "—"),
+            int(data.get("guests") or 1), str(data.get("name") or "—"),
+            str(data.get("phone") or "—"),
+            comment=iiko_booking_comment(flavors_text, tg_user)
+        ))
         await message.answer(f"✅ <b>Бронь #{booking_id} принята!</b>", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Webapp error: {e}")
@@ -275,8 +346,9 @@ async def cb_cancel(callback: CallbackQuery):
             await callback.answer("Бронь не найдена")
             return
         await conn.execute("UPDATE bookings SET status='cancelled' WHERE id=$1", bid)
+    iiko_note = "\n🛑 В iiko остался резерв — снимите его на кассе." if row.get("iiko_reserve_id") else ""
     await callback.message.edit_text(
-        callback.message.text + "\n\n❌ <b>Отменено</b>",
+        callback.message.text + f"\n\n❌ <b>Отменено</b>{iiko_note}",
         parse_mode="HTML"
     )
     # Notify guest if tg_user_id known
@@ -514,7 +586,110 @@ async def cmd_cancelbook(message: Message):
             )
         except:
             pass
-    await message.answer(f"✅ Бронь #{bid} отменена.")
+    iiko_note = "\n🛑 В iiko остался резерв — снимите его на кассе." if row.get("iiko_reserve_id") else ""
+    await message.answer(f"✅ Бронь #{bid} отменена.{iiko_note}")
+
+
+# ─── iiko: админ-команды ──────────────────────────────────────────────────────
+
+@dp.message(Command("iiko"))
+async def cmd_iiko(message: Message):
+    if not is_admin(message.from_user.id): return
+    if not iiko.is_enabled():
+        await message.answer(
+            "🔌 Интеграция с iiko <b>выключена</b>.\n"
+            "Задайте переменную окружения <code>IIKO_API_LOGIN</code> и перезапустите бота.",
+            parse_mode="HTML")
+        return
+    token = await iiko.get_token()
+    if not token:
+        await message.answer("❌ Не удалось получить токен iiko — проверьте IIKO_API_LOGIN.")
+        return
+    orgs = await iiko.get_reserve_organizations()
+    org_id, tg_id = await iiko.resolve_org_and_terminal()
+    mapped = await db_pool.fetchval("SELECT COUNT(*) FROM iiko_table_map") if db_pool else 0
+    lines = ["🟢 <b>iiko подключён</b>\n"]
+    if orgs:
+        lines.append("Организации с модулем резервов:")
+        for o in orgs:
+            mark = " ✅" if o["id"] == org_id else ""
+            lines.append(f"• {o.get('name','—')}\n  <code>{o['id']}</code>{mark}")
+    else:
+        lines.append("⚠️ Нет организаций с модулем «Банкеты и резервы» — "
+                     "проверьте лицензию у дилера iiko.")
+    lines.append(f"\nТерминальная группа: <code>{tg_id or 'не найдена'}</code>")
+    lines.append(f"Привязано столов: <b>{mapped}</b> (настройка: /iiko_tables → /iiko_map)")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@dp.message(Command("iiko_tables"))
+async def cmd_iiko_tables(message: Message):
+    if not is_admin(message.from_user.id): return
+    if not iiko.is_enabled():
+        await message.answer("Интеграция с iiko выключена (IIKO_API_LOGIN).")
+        return
+    sections = await iiko.get_restaurant_sections()
+    if not sections:
+        await message.answer(
+            "❌ Залы не получены. Проверьте /iiko, лицензию «Банкеты и резервы» "
+            "и что схема залов заведена в iikoOffice.")
+        return
+    lines = ["🏛 <b>Залы и столы в iiko</b>\n"]
+    for sec in sections:
+        lines.append(f"<b>{sec.get('name','—')}</b>")
+        for t in sec.get("tables") or []:
+            cap = t.get("seatingCapacity")
+            cap_s = f", мест: {cap}" if cap else ""
+            lines.append(f"  №{t.get('number','?')}{cap_s}\n  <code>{t['id']}</code>")
+        lines.append("")
+    lines.append("Привязка: <code>/iiko_map &lt;зона&gt; &lt;стол&gt; &lt;id&gt;</code>\n"
+                 "Зоны бота: <code>LIWAN</code> (1–12), <code>Веранда Liwan</code> (1–6)")
+    text = "\n".join(lines)
+    for i in range(0, len(text), 3800):
+        await message.answer(text[i:i+3800], parse_mode="HTML")
+
+
+@dp.message(Command("iiko_map"))
+async def cmd_iiko_map(message: Message):
+    if not is_admin(message.from_user.id): return
+    parts = (message.text or "").split()[1:]
+    if not parts:
+        rows = await db_pool.fetch(
+            "SELECT zone, table_num, iiko_table_id FROM iiko_table_map ORDER BY zone, table_num")
+        if not rows:
+            await message.answer(
+                "Привязок нет.\n\n"
+                "Добавить: <code>/iiko_map LIWAN 3 &lt;id стола из /iiko_tables&gt;</code>\n"
+                "Удалить: <code>/iiko_map del LIWAN 3</code>",
+                parse_mode="HTML")
+            return
+        lines = ["🔗 <b>Привязка столов к iiko</b>\n"]
+        for r in rows:
+            lines.append(f"{r['zone']} №{r['table_num']} → <code>{r['iiko_table_id']}</code>")
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        return
+    if parts[0].lower() == "del":
+        if len(parts) < 3 or not parts[-1].isdigit():
+            await message.answer("Формат: <code>/iiko_map del &lt;зона&gt; &lt;стол&gt;</code>", parse_mode="HTML")
+            return
+        zone, table_num = " ".join(parts[1:-1]), int(parts[-1])
+        await db_pool.execute(
+            "DELETE FROM iiko_table_map WHERE zone=$1 AND table_num=$2", zone, table_num)
+        await message.answer(f"🗑 Привязка {zone} №{table_num} удалена.")
+        return
+    # /iiko_map <зона...> <стол> <guid> — зона может содержать пробелы
+    if len(parts) < 3 or not parts[-2].isdigit():
+        await message.answer(
+            "Формат: <code>/iiko_map &lt;зона&gt; &lt;номер стола&gt; &lt;id из /iiko_tables&gt;</code>",
+            parse_mode="HTML")
+        return
+    zone = " ".join(parts[:-2])
+    table_num, table_id = int(parts[-2]), parts[-1]
+    await db_pool.execute("""
+        INSERT INTO iiko_table_map (zone, table_num, iiko_table_id) VALUES ($1,$2,$3)
+        ON CONFLICT (zone, table_num) DO UPDATE SET iiko_table_id=$3
+    """, zone, table_num, table_id)
+    await message.answer(f"✅ {zone} №{table_num} → <code>{table_id}</code>", parse_mode="HTML")
 
 
 # ─── Статистика ───────────────────────────────────────────────────────────────
@@ -830,6 +1005,10 @@ async def cmd_help(message: Message):
             "/unblock_id [id] — снять блокировку\n\n"
             "<b>Рассылка:</b>\n"
             "/broadcast — отправить сообщение всем гостям\n\n"
+            "<b>iiko:</b>\n"
+            "/iiko — статус интеграции\n"
+            "/iiko_tables — залы и столы из iiko\n"
+            "/iiko_map — привязка столов бота к iiko\n\n"
             "/done — завершить загрузку фото",
             parse_mode="HTML"
         )
@@ -1001,6 +1180,13 @@ async def api_booking_post(request):
             InlineKeyboardButton(text="❌ Отменить", callback_data=f"cancel_{booking_id}")
         ]])
         await bot.send_message(ADMIN_CHAT_ID, text, parse_mode="HTML", reply_markup=kb)
+        asyncio.create_task(sync_booking_to_iiko(
+            booking_id, str(data.get("zone") or "—"), int(data.get("table") or 0),
+            str(data.get("date") or "—"), str(data.get("time") or "—"),
+            int(data.get("guests") or 1), str(data.get("name") or "—"),
+            str(data.get("phone") or "—"),
+            comment=iiko_booking_comment(flavors_text, tg_user)
+        ))
 
         # Update Loona card after booking
         if LOONA_ENABLED and tg_user_id:
@@ -1043,7 +1229,8 @@ async def api_cancel_booking(request):
             if not row:
                 return web.json_response({"ok": False, "error": "Not found"})
             await conn.execute("UPDATE bookings SET status='cancelled' WHERE id=$1", bid)
-        await bot.send_message(ADMIN_CHAT_ID, f"❌ <b>Гость отменил бронь #{bid}</b>\n👤 {row['name']}", parse_mode="HTML")
+        iiko_note = "\n🛑 В iiko остался резерв — снимите его на кассе." if row.get("iiko_reserve_id") else ""
+        await bot.send_message(ADMIN_CHAT_ID, f"❌ <b>Гость отменил бронь #{bid}</b>\n👤 {row['name']}{iiko_note}", parse_mode="HTML")
         return web.json_response({"ok": True})
     except Exception as e:
         return web.json_response({"ok": False, "error": str(e)})
@@ -1252,11 +1439,13 @@ async def api_reschedule_booking(request):
                 new_date, new_time, bid
             )
         # Notify admin
+        iiko_note = ("\n🛑 В iiko резерв остался на старое время — перенесите на кассе."
+                     if row.get("iiko_reserve_id") else "")
         await bot.send_message(
             ADMIN_CHAT_ID,
             f"🔄 <b>Перенос брони #{bid}</b>\n"
             f"👤 {row['name']}\n"
-            f"📅 {row['book_date']} {row['book_time']} → {new_date} {new_time}",
+            f"📅 {row['book_date']} {row['book_time']} → {new_date} {new_time}{iiko_note}",
             parse_mode="HTML"
         )
         return web.json_response({"ok": True})
