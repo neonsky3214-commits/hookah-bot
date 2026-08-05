@@ -55,6 +55,37 @@ def format_iiko_dt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S.000")
 
 
+def parse_iiko_dt(s: str) -> datetime | None:
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+                "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(s.strip(), fmt)
+        except (ValueError, AttributeError):
+            continue
+    return None
+
+
+def tables_taken_from_reserves(reserves: list, id_to_num: dict, day: datetime,
+                               req_minutes: int | None = None,
+                               default_duration: int = 120) -> set:
+    """Номера столов бота, занятых резервами iiko в указанный день.
+    req_minutes — запрошенное время в минутах от полуночи; None = весь день."""
+    taken = set()
+    for res in reserves:
+        start = parse_iiko_dt(res.get("estimatedStartTime") or "")
+        if not start or start.date() != day.date():
+            continue
+        if req_minutes is not None:
+            start_min = start.hour * 60 + start.minute
+            dur = int(res.get("durationInMinutes") or default_duration)
+            if not (start_min <= req_minutes < start_min + dur):
+                continue
+        for tid in res.get("tableIds") or []:
+            if tid in id_to_num:
+                taken.add(id_to_num[tid])
+    return taken
+
+
 def norm_phone(p: str) -> str:
     p = "".join(ch for ch in (p or "") if ch.isdigit() or ch == "+")
     if p.startswith("8") and len(p) == 11:
@@ -181,8 +212,14 @@ async def resolve_org_and_terminal() -> tuple[str | None, str | None]:
     return org_id, tg_id
 
 
-async def get_restaurant_sections() -> list:
+_sections_cache = {"data": None, "at": 0}
+
+
+async def get_restaurant_sections(cached: bool = True) -> list:
     """Залы и столы с GUID (для привязки к столам Mini App через /iiko_map)."""
+    now = time.time()
+    if cached and _sections_cache["data"] is not None and now - _sections_cache["at"] < 600:
+        return _sections_cache["data"]
     _, tg_id = await resolve_org_and_terminal()
     if not tg_id:
         return []
@@ -190,7 +227,10 @@ async def get_restaurant_sections() -> list:
                        {"terminalGroupIds": [tg_id], "returnSchema": False})
     if not data or "_error" in data:
         return []
-    return data.get("restaurantSections") or []
+    sections = data.get("restaurantSections") or []
+    _sections_cache["data"] = sections
+    _sections_cache["at"] = now
+    return sections
 
 
 async def get_sections_workload(section_ids: list, date_from: datetime) -> list:
@@ -201,6 +241,29 @@ async def get_sections_workload(section_ids: list, date_from: datetime) -> list:
     if not data or "_error" in data:
         return []
     return data.get("reserves") or []
+
+
+_workload_cache: dict = {}
+
+
+async def get_workload_for_day(day: datetime) -> list:
+    """Резервы iiko на день, кеш 60 сек — Mini App дёргает занятость часто."""
+    key = day.strftime("%Y-%m-%d")
+    now = time.time()
+    cached = _workload_cache.get(key)
+    if cached and now - cached["at"] < 60:
+        return cached["reserves"]
+    sections = await get_restaurant_sections()
+    section_ids = [s["id"] for s in sections if s.get("id")]
+    if not section_ids:
+        return []
+    reserves = await get_sections_workload(
+        section_ids, day.replace(hour=0, minute=0, second=0, microsecond=0))
+    _workload_cache[key] = {"at": now, "reserves": reserves}
+    if len(_workload_cache) > 30:
+        oldest = min(_workload_cache, key=lambda k: _workload_cache[k]["at"])
+        _workload_cache.pop(oldest, None)
+    return reserves
 
 
 async def create_reserve(table_ids: list, start: datetime, guests: int,

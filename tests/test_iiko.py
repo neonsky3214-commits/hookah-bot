@@ -1,7 +1,8 @@
 from datetime import datetime
 
 from iiko import (build_reserve_payload, format_iiko_dt, norm_phone,
-                  parse_booking_datetime)
+                  parse_booking_datetime, parse_iiko_dt,
+                  tables_taken_from_reserves)
 
 NOW = datetime(2026, 8, 5, 12, 0)
 
@@ -59,3 +60,43 @@ def test_build_reserve_payload_defaults():
     assert p["guestsCount"] == 1
     assert p["customer"]["name"] == "Гость"
     assert p["durationInMinutes"] == 120
+
+
+def test_parse_iiko_dt():
+    assert parse_iiko_dt("2026-08-07 19:00:00.000") == datetime(2026, 8, 7, 19, 0)
+    assert parse_iiko_dt("2026-08-07T19:00:00") == datetime(2026, 8, 7, 19, 0)
+    assert parse_iiko_dt("мусор") is None
+    assert parse_iiko_dt("") is None
+
+
+DAY = datetime(2026, 8, 7)
+ID_TO_NUM = {"guid-3": 3, "guid-5": 5}
+RESERVES = [
+    {"estimatedStartTime": "2026-08-07 19:00:00.000", "durationInMinutes": 120,
+     "tableIds": ["guid-3"]},
+    {"estimatedStartTime": "2026-08-07 12:00:00.000", "durationInMinutes": 60,
+     "tableIds": ["guid-5"]},
+    {"estimatedStartTime": "2026-08-08 19:00:00.000", "durationInMinutes": 120,
+     "tableIds": ["guid-3"]},                       # другой день
+    {"estimatedStartTime": "2026-08-07 19:00:00.000", "durationInMinutes": 120,
+     "tableIds": ["guid-unknown"]},                 # стол без привязки
+]
+
+
+def test_workload_whole_day():
+    assert tables_taken_from_reserves(RESERVES, ID_TO_NUM, DAY) == {3, 5}
+
+
+def test_workload_overlapping_slot():
+    # 20:00 попадает в резерв 19:00–21:00 (стол 3), но не в 12:00–13:00 (стол 5)
+    assert tables_taken_from_reserves(RESERVES, ID_TO_NUM, DAY, 20 * 60) == {3}
+
+
+def test_workload_free_slot():
+    assert tables_taken_from_reserves(RESERVES, ID_TO_NUM, DAY, 15 * 60) == set()
+
+
+def test_workload_slot_boundaries():
+    # начало включительно, конец исключительно
+    assert tables_taken_from_reserves(RESERVES, ID_TO_NUM, DAY, 19 * 60) == {3}
+    assert tables_taken_from_reserves(RESERVES, ID_TO_NUM, DAY, 21 * 60) == set()

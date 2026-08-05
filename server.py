@@ -1124,7 +1124,30 @@ async def api_taken(request):
                 return web.json_response({"taken": list(range(1, 13)), "blocked": True})
     else:
         taken = [r['table_num'] for r in rows]
+    # столы, занятые резервами с кассы iiko (внесёнными мимо бота)
+    try:
+        iiko_taken = await iiko_taken_tables(zone, book_date, book_time)
+        if iiko_taken:
+            taken = sorted(set(taken) | iiko_taken)
+    except Exception as e:
+        logger.error(f"iiko workload error: {e}")
     return web.json_response({"taken": taken})
+
+
+async def iiko_taken_tables(zone: str, book_date: str, book_time: str | None) -> set:
+    if not iiko.is_enabled() or not db_pool:
+        return set()
+    day = iiko.parse_booking_datetime(book_date, "00:00")
+    if not day:
+        return set()
+    rows = await db_pool.fetch(
+        "SELECT table_num, iiko_table_id FROM iiko_table_map WHERE zone=$1", zone)
+    if not rows:
+        return set()
+    id_to_num = {r["iiko_table_id"]: r["table_num"] for r in rows}
+    reserves = await iiko.get_workload_for_day(day)
+    req_minutes = time_to_minutes(book_time) if book_time else None
+    return iiko.tables_taken_from_reserves(reserves, id_to_num, day, req_minutes)
 
 
 async def api_booking_post(request):
